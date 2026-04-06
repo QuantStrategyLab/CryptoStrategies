@@ -84,6 +84,15 @@ class PrepareAutoOptimizationPrTests(unittest.TestCase):
         self.assertFalse(blocked["allowed"])
         self.assertEqual(blocked["blocked_files"], ["src/crypto_strategies/catalog.py"])
 
+    def test_evaluate_changed_files_blocks_binance_runtime_boundary_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo_root = Path(temp_dir) / "BinancePlatform"
+            repo_root.mkdir()
+            blocked = evaluate_changed_files(["strategy_runtime.py", "decision_mapper.py"], repo_root=repo_root)
+
+        self.assertFalse(blocked["allowed"])
+        self.assertEqual(blocked["blocked_files"], ["strategy_runtime.py", "decision_mapper.py"])
+
     def test_render_pr_body_contains_merge_policy_and_issue_reference(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             payload = build_payload(self.issue_context, repo_root=Path(temp_dir))
