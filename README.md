@@ -11,6 +11,17 @@ Standalone crypto strategy repository for QuantStrategyLab platforms.
 
 This repository owns pure strategy logic and strategy metadata. The downstream execution repo still owns exchange access, market-data fetches, runtime state, circuit breakers, Flexible Earn handling, notifications, and order placement.
 
+### Contract boundary
+
+The supported downstream surface is now the manifest-backed unified entrypoint for each live profile.
+
+- `CryptoStrategies` owns pure decision logic and manifest metadata
+- `BinancePlatform` loads that entrypoint through `QuantPlatformKit`
+- shared outputs stay inside `StrategyDecision`
+- exchange-specific safety checks, order sequencing, and artifact freshness handling stay in the execution repo
+
+Legacy `core` / `rotation` modules may still exist as internal implementation details, but downstream runtimes should not bind to those component names anymore.
+
 ### Strategy index
 
 | Profile | Downstream runtime today | Core idea |
@@ -94,6 +105,17 @@ These strategies are consumed by platform repositories through `QuantPlatformKit
 这是 `QuantStrategyLab` 的独立加密货币策略仓。
 
 这个仓库负责纯策略逻辑和策略元数据。下游执行仓库继续负责交易所接入、行情获取、运行时状态、熔断、Flexible Earn、通知和实际下单。
+
+### 契约边界
+
+当前正式对下游开放的是每个 live profile 的 manifest 驱动统一 entrypoint。
+
+- `CryptoStrategies` 负责纯决策逻辑和 manifest 元数据
+- `BinancePlatform` 通过 `QuantPlatformKit` 加载这个 entrypoint
+- 共享输出保持在 `StrategyDecision` 契约内
+- 交易所专属安全检查、下单顺序和 artifact 新鲜度校验继续放在执行仓库
+
+旧的 `core` / `rotation` 模块可以继续作为仓库内部实现细节存在，但下游运行时不应再绑定这些组件名。
 
 ### 策略索引
 
