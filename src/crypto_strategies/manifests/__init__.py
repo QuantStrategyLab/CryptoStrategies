@@ -10,11 +10,11 @@ crypto_leader_rotation_manifest = StrategyManifest(
     description="Trend-following crypto rotation with staged entries, degradation controls, and cash parking.",
     required_inputs=frozenset(
         {
-            "prices",
-            "trend_indicators",
-            "btc_snapshot",
-            "account_metrics",
-            "trend_universe_symbols",
+            "market_prices",
+            "derived_indicators",
+            "benchmark_snapshot",
+            "portfolio_snapshot",
+            "universe_snapshot",
         }
     ),
     default_config={

@@ -2,14 +2,20 @@ from __future__ import annotations
 
 import unittest
 
+from quant_platform_kit import PortfolioSnapshot, Position
 from quant_platform_kit.strategy_contracts import StrategyContext
 from crypto_strategies import get_strategy_entrypoint
-from crypto_strategies.strategies.crypto_leader_rotation import core as legacy_core
-from crypto_strategies.strategies.crypto_leader_rotation import rotation as legacy_rotation
 
 
 class CryptoStrategyEntrypointTests(unittest.TestCase):
     def test_crypto_leader_rotation_entrypoint_matches_legacy_budget_and_rotation_outputs(self) -> None:
+        try:
+            from crypto_strategies.strategies.crypto_leader_rotation import core as legacy_core
+            from crypto_strategies.strategies.crypto_leader_rotation import rotation as legacy_rotation
+        except ModuleNotFoundError as exc:
+            if exc.name == "pandas":
+                self.skipTest("pandas is not installed")
+            raise
         entrypoint = get_strategy_entrypoint("crypto_leader_rotation")
         prices = {
             "ETHUSDT": 3000.0,
@@ -132,11 +138,25 @@ class CryptoStrategyEntrypointTests(unittest.TestCase):
             StrategyContext(
                 as_of="2026-04-06",
                 market_data={
-                    "prices": prices,
-                    "trend_indicators": trend_indicators,
-                    "btc_snapshot": btc_snapshot,
-                    "account_metrics": account_metrics,
-                    "trend_universe_symbols": list(prices),
+                    "market_prices": prices,
+                    "derived_indicators": trend_indicators,
+                    "benchmark_snapshot": btc_snapshot,
+                    "portfolio_snapshot": PortfolioSnapshot(
+                        as_of="2026-04-06",
+                        total_equity=account_metrics["total_equity"],
+                        buying_power=account_metrics["cash_usdt"],
+                        cash_balance=account_metrics["cash_usdt"],
+                        positions=(
+                            Position(symbol="BTCUSDT", quantity=0.2, market_value=account_metrics["dca_value"]),
+                            Position(symbol="ETHUSDT", quantity=2.0, market_value=9000.0),
+                            Position(symbol="SOLUSDT", quantity=20.0, market_value=6000.0),
+                        ),
+                        metadata={
+                            "account_metrics": account_metrics,
+                            "cash_available_for_trading": account_metrics["cash_usdt"],
+                        },
+                    ),
+                    "universe_snapshot": list(prices),
                 },
                 state=state,
                 artifacts={"trend_pool_contract": {"source": "explicit_artifact"}},
@@ -172,20 +192,36 @@ class CryptoStrategyEntrypointTests(unittest.TestCase):
         )
 
     def test_crypto_leader_rotation_entrypoint_sets_regime_off_flag_when_btc_regime_is_off(self) -> None:
-        entrypoint = get_strategy_entrypoint("crypto_leader_rotation")
-        decision = entrypoint.evaluate(
-            StrategyContext(
-                as_of="2026-04-06",
-                market_data={
-                    "prices": {},
-                    "trend_indicators": {},
-                    "btc_snapshot": {"regime_on": False, "btc_roc20": 0.0, "btc_roc60": 0.0, "btc_roc120": 0.0},
-                    "account_metrics": {"total_equity": 1000.0, "cash_usdt": 1000.0, "trend_value": 0.0, "dca_value": 0.0},
-                    "trend_universe_symbols": [],
-                },
-                state={},
+        try:
+            entrypoint = get_strategy_entrypoint("crypto_leader_rotation")
+        except ModuleNotFoundError as exc:
+            if exc.name == "pandas":
+                self.skipTest("pandas is not installed")
+            raise
+        try:
+            decision = entrypoint.evaluate(
+                StrategyContext(
+                    as_of="2026-04-06",
+                    market_data={
+                        "market_prices": {},
+                        "derived_indicators": {},
+                        "benchmark_snapshot": {"regime_on": False, "btc_roc20": 0.0, "btc_roc60": 0.0, "btc_roc120": 0.0},
+                        "portfolio_snapshot": PortfolioSnapshot(
+                            as_of="2026-04-06",
+                            total_equity=1000.0,
+                            buying_power=1000.0,
+                            cash_balance=1000.0,
+                            metadata={"account_metrics": {"total_equity": 1000.0, "cash_usdt": 1000.0, "trend_value": 0.0, "dca_value": 0.0}},
+                        ),
+                        "universe_snapshot": [],
+                    },
+                    state={},
+                )
             )
-        )
+        except ModuleNotFoundError as exc:
+            if exc.name == "pandas":
+                self.skipTest("pandas is not installed")
+            raise
 
         self.assertIn("regime_off", decision.risk_flags)
         self.assertIn("no_trend_candidates", decision.risk_flags)

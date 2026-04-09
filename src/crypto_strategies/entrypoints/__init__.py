@@ -12,8 +12,6 @@ from quant_platform_kit.strategy_contracts import (
 )
 
 from crypto_strategies.manifests import crypto_leader_rotation_manifest
-from crypto_strategies.strategies.crypto_leader_rotation import core as legacy_core
-from crypto_strategies.strategies.crypto_leader_rotation import rotation as legacy_rotation
 
 
 """Unified crypto strategy entrypoints built on top of legacy core/rotation modules."""
@@ -29,6 +27,50 @@ def _require_market_data(ctx: StrategyContext, key: str):
     if key not in ctx.market_data:
         raise ValueError(f"StrategyContext.market_data missing required key: {key}")
     return ctx.market_data[key]
+
+
+def _resolve_portfolio_snapshot(ctx: StrategyContext):
+    if ctx.portfolio is not None:
+        return ctx.portfolio
+    return _require_market_data(ctx, "portfolio_snapshot")
+
+
+def _resolve_account_metrics(ctx: StrategyContext) -> dict[str, float]:
+    snapshot = _resolve_portfolio_snapshot(ctx)
+    metadata = dict(getattr(snapshot, "metadata", {}) or {})
+    embedded_metrics = metadata.get("account_metrics")
+    if isinstance(embedded_metrics, Mapping):
+        return {
+            "total_equity": float(embedded_metrics["total_equity"]),
+            "cash_usdt": float(embedded_metrics["cash_usdt"]),
+            "trend_value": float(embedded_metrics["trend_value"]),
+            "dca_value": float(embedded_metrics["dca_value"]),
+        }
+
+    cash_usdt = metadata.get("cash_available_for_trading")
+    if cash_usdt is None:
+        cash_usdt = getattr(snapshot, "buying_power", None)
+    if cash_usdt is None:
+        cash_usdt = getattr(snapshot, "cash_balance", None)
+    if cash_usdt is None:
+        cash_usdt = 0.0
+
+    dca_value = 0.0
+    trend_value = 0.0
+    for position in getattr(snapshot, "positions", ()) or ():
+        symbol = str(getattr(position, "symbol", "")).strip().upper()
+        market_value = float(getattr(position, "market_value", 0.0) or 0.0)
+        if symbol == "BTCUSDT":
+            dca_value += market_value
+        else:
+            trend_value += market_value
+
+    return {
+        "total_equity": float(snapshot.total_equity),
+        "cash_usdt": float(cash_usdt),
+        "trend_value": float(metadata.get("trend_value", trend_value)),
+        "dca_value": float(metadata.get("dca_value", dca_value)),
+    }
 
 
 def _resolve_translator(config: Mapping[str, object]) -> Callable[[str], str]:
@@ -67,13 +109,21 @@ def _resolve_state_helpers(config: Mapping[str, object]):
     return _get_symbol_trade_state, _set_symbol_trade_state
 
 
+def _load_legacy_modules():
+    from crypto_strategies.strategies.crypto_leader_rotation import core as legacy_core
+    from crypto_strategies.strategies.crypto_leader_rotation import rotation as legacy_rotation
+
+    return legacy_core, legacy_rotation
+
+
 def evaluate_crypto_leader_rotation(ctx: StrategyContext) -> StrategyDecision:
+    legacy_core, legacy_rotation = _load_legacy_modules()
     config = _merge_runtime_config(ctx)
-    prices = _require_market_data(ctx, "prices")
-    indicators_map = _require_market_data(ctx, "trend_indicators")
-    btc_snapshot = _require_market_data(ctx, "btc_snapshot")
-    account_metrics = _require_market_data(ctx, "account_metrics")
-    trend_universe_symbols = list(_require_market_data(ctx, "trend_universe_symbols"))
+    prices = _require_market_data(ctx, "market_prices")
+    indicators_map = _require_market_data(ctx, "derived_indicators")
+    btc_snapshot = _require_market_data(ctx, "benchmark_snapshot")
+    account_metrics = _resolve_account_metrics(ctx)
+    trend_universe_symbols = list(_require_market_data(ctx, "universe_snapshot"))
     state = dict(ctx.state)
     working_state = deepcopy(state)
     translator = _resolve_translator(config)

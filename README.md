@@ -11,6 +11,12 @@ Standalone crypto strategy repository for QuantStrategyLab platforms.
 
 This repository owns pure strategy logic and strategy metadata. The downstream execution repo still owns exchange access, market-data fetches, runtime state, circuit breakers, Flexible Earn handling, notifications, and order placement.
 
+Recommended entry docs:
+
+- `docs/crypto_cross_platform_strategy_spec.md`
+- `docs/crypto_strategy_template.md`
+- `docs/crypto_portability_checklist.md`
+
 ### Contract boundary
 
 The supported downstream surface is now the manifest-backed unified entrypoint for each live profile.
@@ -105,6 +111,12 @@ These strategies are consumed by platform repositories through `QuantPlatformKit
 这是 `QuantStrategyLab` 的独立加密货币策略仓。
 
 这个仓库负责纯策略逻辑和策略元数据。下游执行仓库继续负责交易所接入、行情获取、运行时状态、熔断、Flexible Earn、通知和实际下单。
+
+建议先读这些文档：
+
+- `docs/crypto_cross_platform_strategy_spec.zh-CN.md`
+- `docs/crypto_strategy_template.zh-CN.md`
+- `docs/crypto_portability_checklist.zh-CN.md`
 
 ### 契约边界
 

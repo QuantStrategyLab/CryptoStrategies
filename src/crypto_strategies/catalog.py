@@ -16,6 +16,20 @@ from quant_platform_kit.common.strategies import (
 
 CRYPTO_LEADER_ROTATION_PROFILE = "crypto_leader_rotation"
 
+CRYPTO_CANONICAL_REQUIRED_INPUTS = frozenset(
+    {
+        "market_prices",
+        "derived_indicators",
+        "benchmark_snapshot",
+        "portfolio_snapshot",
+        "universe_snapshot",
+    }
+)
+
+STRATEGY_TARGET_MODES: dict[str, str] = {
+    CRYPTO_LEADER_ROTATION_PROFILE: "weight",
+}
+
 CRYPTO_LEADER_ROTATION_DEFAULT_CONFIG = {
     "trend_pool_size": 5,
     "rotation_top_n": 2,
@@ -49,16 +63,9 @@ STRATEGY_DEFINITIONS: dict[str, StrategyDefinition] = {
             module_path="crypto_strategies.entrypoints",
             attribute_name="crypto_leader_rotation_entrypoint",
         ),
-        required_inputs=frozenset(
-            {
-                "prices",
-                "trend_indicators",
-                "btc_snapshot",
-                "account_metrics",
-                "trend_universe_symbols",
-            }
-        ),
+        required_inputs=CRYPTO_CANONICAL_REQUIRED_INPUTS,
         default_config=CRYPTO_LEADER_ROTATION_DEFAULT_CONFIG,
+        target_mode=STRATEGY_TARGET_MODES[CRYPTO_LEADER_ROTATION_PROFILE],
     ),
 }
 
