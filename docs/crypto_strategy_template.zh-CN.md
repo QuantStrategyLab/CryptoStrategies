@@ -2,6 +2,17 @@
 
 以后新增加密策略时，按这个模板落。
 
+## 最小目录结构
+
+至少会碰这些位置：
+
+- `src/crypto_strategies/catalog.py`
+- `src/crypto_strategies/manifests/__init__.py`
+- `src/crypto_strategies/entrypoints/__init__.py`
+- `src/crypto_strategies/runtime_adapters.py`
+- `src/crypto_strategies/strategies/` 下面的一份实现模块
+- `tests/` 下面对应测试
+
 ## 最小接入清单
 
 1. 在 `src/crypto_strategies/catalog.py` 里加 `StrategyDefinition`
@@ -24,6 +35,23 @@
 - `target_mode`
 
 其中 `required_inputs` 只能用 canonical 名。
+
+## Manifest 和 entrypoint
+
+manifest 和 catalog 里的定义必须一致，至少包括：
+
+- `profile`
+- `domain`
+- `display_name`
+- `required_inputs`
+- `default_config`
+
+entrypoint 必须做到：
+
+- 只从 `StrategyContext` 读取 canonical 输入
+- 需要组合信息时读 `ctx.portfolio`
+- 只返回 `StrategyDecision`
+- 不把交易所专属执行细节放进策略仓
 
 ## Runtime adapter
 
@@ -49,3 +77,13 @@
 - entrypoint test
 - 检查 canonical inputs 和显式 target mode 的治理测试
 - 变成 live 前，下游平台要补 adapter smoke test
+
+## 新策略 PR checklist
+
+- [ ] 已新增带显式 `target_mode` 的 `StrategyDefinition`
+- [ ] `StrategyManifest` 和 catalog 定义一致
+- [ ] entrypoint 只读取 canonical 输入
+- [ ] 每个兼容平台都补了 runtime adapter
+- [ ] 策略代码里没有平台分支和环境变量读取
+- [ ] catalog、entrypoint、governance 测试已更新
+- [ ] 如果 rollout 变了，下游平台的状态脚本或 adapter smoke 也已更新
