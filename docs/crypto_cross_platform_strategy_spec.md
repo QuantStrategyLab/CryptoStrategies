@@ -44,6 +44,18 @@ A crypto runtime adapter must declare at least:
 - `available_inputs`
 - `available_capabilities`
 - `portfolio_input_name` when the strategy needs `ctx.portfolio`
+- `artifact_contract` when the strategy consumes upstream artifacts
+
+`crypto_leader_rotation` currently declares an explicit artifact contract:
+
+- `requires_snapshot_artifacts = true`
+- `requires_snapshot_manifest_path = true`
+- `snapshot_contract_version = crypto_leader_rotation.live_pool.v1`
+- `config_source_policy = none`
+
+The strategy package owns this declaration. Downstream platforms may decide how
+to fetch the artifact, but they should not infer artifact requirements from
+profile-name branches.
 
 ## Allowed and forbidden boundaries
 

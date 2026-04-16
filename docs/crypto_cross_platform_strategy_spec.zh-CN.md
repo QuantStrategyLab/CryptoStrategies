@@ -44,6 +44,16 @@
 - `available_inputs`
 - `available_capabilities`
 - 当策略需要 `ctx.portfolio` 时的 `portfolio_input_name`
+- 当策略依赖上游 artifact 时的 `artifact_contract`
+
+`crypto_leader_rotation` 当前显式声明的 artifact contract 是：
+
+- `requires_snapshot_artifacts = true`
+- `requires_snapshot_manifest_path = true`
+- `snapshot_contract_version = crypto_leader_rotation.live_pool.v1`
+- `config_source_policy = none`
+
+策略包负责声明这些需求。下游平台可以决定从 Firestore、GCS、本地文件或状态里取 artifact，但不能再靠 profile 名称分支来猜这条策略需要什么 artifact。
 
 ## 允许和禁止
 
