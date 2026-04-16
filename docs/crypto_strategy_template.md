@@ -20,7 +20,8 @@ At minimum, a new profile should touch these places:
 3. add a unified entrypoint in `src/crypto_strategies/entrypoints/__init__.py`
 4. add a runtime adapter in `src/crypto_strategies/runtime_adapters.py`
 5. add catalog and entrypoint tests
-6. if the profile becomes live, add platform status and portability checks downstream
+6. if the profile consumes upstream artifacts, add an explicit `StrategyArtifactContract`
+7. if the profile becomes live, add platform status and portability checks downstream
 
 ## StrategyDefinition
 
@@ -59,8 +60,12 @@ A new runtime adapter must declare at least:
 
 - `available_inputs`
 - `portfolio_input_name` when the strategy reads `ctx.portfolio`
+- `artifact_contract` when the strategy needs upstream artifacts
 
 If a platform does not support the profile yet, do not add it to `supported_platforms`.
+
+The artifact contract belongs in this strategy package. Platform repositories
+should consume it and map it to their own env/filesystem/runtime source rules.
 
 ## Forbidden shortcuts
 
@@ -84,6 +89,7 @@ Do not:
 - [ ] `StrategyManifest` matches the catalog definition
 - [ ] entrypoint reads only canonical inputs
 - [ ] runtime adapter added for every compatible platform
+- [ ] artifact contract added when upstream artifacts are required
 - [ ] strategy code has no platform branch or env reads
 - [ ] catalog, entrypoint, and governance tests were updated
 - [ ] downstream platform status script or adapter smoke was updated when rollout changed

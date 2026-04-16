@@ -20,7 +20,8 @@
 3. 在 `src/crypto_strategies/entrypoints/__init__.py` 里加统一 entrypoint
 4. 在 `src/crypto_strategies/runtime_adapters.py` 里加 runtime adapter
 5. 补 catalog 和 entrypoint 测试
-6. 如果要变成 live，再去下游平台补状态和 portability 检查
+6. 如果策略消费上游 artifact，补显式 `StrategyArtifactContract`
+7. 如果要变成 live，再去下游平台补状态和 portability 检查
 
 ## StrategyDefinition 必填项
 
@@ -59,8 +60,11 @@ entrypoint 必须做到：
 
 - `available_inputs`
 - 如果策略会读 `ctx.portfolio`，则声明 `portfolio_input_name`
+- 如果策略依赖上游 artifact，则声明 `artifact_contract`
 
 如果某个平台还不支持这条策略，就不要先把它写进 `supported_platforms`。
+
+artifact contract 属于策略包。平台仓库只负责把它映射到自己的环境变量、文件、Firestore/GCS 或 runtime 状态来源，不能靠 profile 名称分支来猜策略需要什么 artifact。
 
 ## 禁止的偷懒方式
 
@@ -84,6 +88,7 @@ entrypoint 必须做到：
 - [ ] `StrategyManifest` 和 catalog 定义一致
 - [ ] entrypoint 只读取 canonical 输入
 - [ ] 每个兼容平台都补了 runtime adapter
+- [ ] 需要上游 artifact 时已新增 artifact contract
 - [ ] 策略代码里没有平台分支和环境变量读取
 - [ ] catalog、entrypoint、governance 测试已更新
 - [ ] 如果 rollout 变了，下游平台的状态脚本或 adapter smoke 也已更新
