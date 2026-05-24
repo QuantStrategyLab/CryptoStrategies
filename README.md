@@ -11,6 +11,8 @@ Standalone crypto strategy repository for QuantStrategyLab platforms.
 
 This repository owns pure strategy logic and strategy metadata. The downstream execution repo still owns exchange access, market-data fetches, runtime state, circuit breakers, Flexible Earn handling, notifications, and order placement.
 
+Monthly report review, AI audit, and automated remediation workflows belong to snapshot artifact repositories such as `CryptoSnapshotPipelines`. This repository does not run monthly report audit automation directly.
+
 Recommended entry docs:
 
 - `docs/crypto_cross_platform_strategy_spec.md`
@@ -25,6 +27,7 @@ The supported downstream surface is now the manifest-backed unified entrypoint f
 - `BinancePlatform` loads that entrypoint through `QuantPlatformKit`
 - shared outputs stay inside `StrategyDecision`
 - exchange-specific safety checks, order sequencing, and artifact freshness handling stay in the execution repo
+- monthly report audit and remediation workflows stay in snapshot artifact repositories
 
 Legacy `core` / `rotation` modules may still exist as internal implementation details, but downstream runtimes should not bind to those component names anymore.
 
