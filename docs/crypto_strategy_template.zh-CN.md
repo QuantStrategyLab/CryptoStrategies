@@ -1,5 +1,15 @@
 # 加密策略模板
 
+
+## English summary
+
+- Full English version: [`crypto_strategy_template.md`](crypto_strategy_template.md). This summary keeps an English entry point in the Chinese file.
+- Purpose: this document covers `加密策略模板` for `CryptoStrategies`.
+- Main topics: `最小目录结构`, `最小接入清单`, `StrategyDefinition 必填项`, `Manifest 和 entrypoint`, `Runtime adapter`.
+- Read the boundaries, inputs, outputs, and permission requirements before running commands, CI jobs, dry-runs, releases, or runtime switches.
+- For live trading, secrets, Cloud Run, exchange, or broker API changes, validate in test or dry-run mode first and do not change production only from examples.
+- If this summary differs from the detailed Chinese body, follow the concrete commands, configuration keys, and constraints in the body.
+
 以后新增加密策略时，按这个模板落。
 
 ## 最小目录结构
