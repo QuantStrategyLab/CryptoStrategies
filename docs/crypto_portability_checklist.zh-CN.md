@@ -1,5 +1,15 @@
 # 加密策略 portability 清单
 
+
+## English summary
+
+- Full English version: [`crypto_portability_checklist.md`](crypto_portability_checklist.md). This summary keeps an English entry point in the Chinese file.
+- Purpose: this document covers `加密策略 portability 清单` for `CryptoStrategies`.
+- Main topics: `加密策略 portability 清单`.
+- Read the boundaries, inputs, outputs, and permission requirements before running commands, CI jobs, dry-runs, releases, or runtime switches.
+- For live trading, secrets, Cloud Run, exchange, or broker API changes, validate in test or dry-run mode first and do not change production only from examples.
+- If this summary differs from the detailed Chinese body, follow the concrete commands, configuration keys, and constraints in the body.
+
 在某条加密策略真正放到下游平台启用前，先过这张清单。
 
 - [ ] `required_inputs` 只使用 canonical 加密输入名
