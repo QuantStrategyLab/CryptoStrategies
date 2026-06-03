@@ -136,21 +136,10 @@ def evaluate_crypto_leader_rotation(ctx: StrategyContext) -> StrategyDecision:
         account_metrics.get("dca_value", 0.0),
     )
 
-    selected_pool, ranking = legacy_rotation.refresh_rotation_pool(
+    selected_pool = legacy_rotation.resolve_authoritative_rotation_pool(
         working_state,
-        indicators_map,
-        btc_snapshot,
         trend_universe_symbols=trend_universe_symbols,
         trend_pool_size=config["trend_pool_size"],
-        build_stable_quality_pool_fn=lambda indicators, btc, previous_pool: legacy_core.build_stable_quality_pool(
-            indicators,
-            btc,
-            previous_pool,
-            pool_size=config["trend_pool_size"],
-            min_history_days=config["min_history_days"],
-            min_avg_quote_vol_180=config["min_avg_quote_vol_180"],
-            membership_bonus=config["membership_bonus"],
-        ),
         allow_refresh=bool(config.get("allow_rotation_refresh", True)),
         now_utc=config.get("now_utc"),
     )
@@ -242,7 +231,7 @@ def evaluate_crypto_leader_rotation(ctx: StrategyContext) -> StrategyDecision:
             }
             for symbol, payload in selected_candidates.items()
         },
-        "ranking_preview": tuple(item["symbol"] for item in ranking[: int(config["trend_pool_size"])]),
+        "ranking_preview": tuple(selected_pool[: int(config["trend_pool_size"])]),
         "rotation_pool_source_version": working_state.get("rotation_pool_source_version"),
         "rotation_pool_source_as_of_date": working_state.get("rotation_pool_source_as_of_date"),
         "rotation_pool_last_month": working_state.get("rotation_pool_last_month"),
