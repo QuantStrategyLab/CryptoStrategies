@@ -15,7 +15,7 @@ CryptoStrategies 是 QuantStrategyLab 的加密货币策略包。为 Binance 执
 - **执行平台**：把策略接到券商、dry-run 检查、通知和 live 部署控制。
 - **共享基础设施**：沉淀契约、配置、适配器、插件和审计 workflow，供多仓复用。
 
-本仓库负责策略代码和元数据。对 snapshot-backed 加密策略来说，本仓库只消费上游 live pool，不在本地重建月度池成员或顺序。本仓库不保存券商凭据，不直接提交订单，也不替代 live enable 前需要看的 snapshot 和回测证据。
+本仓库负责策略代码和元数据。对 snapshot-backed 加密策略来说，本仓库只消费上游 live pool，不在本地重建月度池成员或顺序。本仓库不保存券商凭据，不直接提交订单，也不替代 live enable 前需要看的 live-pool/release 证据。
 
 ## 策略 profile
 
@@ -27,11 +27,11 @@ CryptoStrategies 是 QuantStrategyLab 的加密货币策略包。为 Binance 执
 
 ### Snapshot-backed 策略
 
-这些 profile 依赖 `CryptoSnapshotPipelines` 生成的 artifact；下游平台使用前，应先确认对应产物已经验证和提升。
+这些 profile 依赖 `CryptoLivePoolPipelines` 生成的 artifact；下游平台使用前，应先确认对应产物已经验证和提升。
 
 | Profile | 名称 | 说明 |
 | --- | --- | --- |
-| `crypto_leader_rotation` | Crypto Leader Rotation | 消费 CryptoSnapshotPipelines 发布的有序 live pool 的趋势轮动策略。运行时代码可以在该池内做交易门控和仓位 sizing，但月度选池和排序属于上游。 |
+| `crypto_leader_rotation` | Crypto Leader Rotation | 消费 CryptoLivePoolPipelines 发布的有序 live pool 的趋势轮动策略。运行时代码可以在该池内做交易门控和仓位 sizing，但月度选池和排序属于上游。 |
 
 ### 研究侧候选
 
@@ -47,7 +47,7 @@ CryptoStrategies 是 QuantStrategyLab 的加密货币策略包。为 Binance 执
 
 ## 策略证据和 live enablement
 
-README 只作为项目地图，不替代最新表现数据。启用或调整 live profile 前，需要重新运行相关 snapshot/backtest pipeline，并分别看短、中、长周期的收益、最大回撤、相对基准收益、换手、数据新鲜度和 artifact 版本。月度 live-pool 选择、ranking 和 promotion 证据属于 CryptoSnapshotPipelines；本仓库的策略改动应保留这个上游权威边界。证据过期、不完整，或者 profile 仍标记为 research-only，就不要放进 live runtime settings。
+README 只作为项目地图，不替代最新表现数据。启用或调整 live profile 前，需要重新运行相关 live-pool/release pipeline，并分别看短、中、长周期的收益、最大回撤、相对基准收益、换手、数据新鲜度和 artifact 版本。月度 live-pool 选择、ranking 和 promotion 证据属于 CryptoLivePoolPipelines；本仓库的策略改动应保留这个上游权威边界。证据过期、不完整，或者 profile 仍标记为 research-only，就不要放进 live runtime settings。
 
 ## 仓库结构
 

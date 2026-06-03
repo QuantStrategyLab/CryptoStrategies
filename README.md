@@ -15,7 +15,7 @@ It is one layer of a multi-repository system:
 - **Platform runtimes**: connect strategies to brokers, dry-run checks, notifications, and live deployment controls.
 - **Shared infrastructure**: keeps contracts, settings, adapters, plugins, and audit workflows reusable across repositories.
 
-This repository owns strategy code and metadata. For snapshot-backed crypto profiles, it consumes the upstream live pool and does not rebuild monthly pool membership or ordering locally. It does not hold broker credentials, submit orders by itself, or replace the snapshot/backtest evidence required before a profile is enabled for live runtime settings.
+This repository owns strategy code and metadata. For snapshot-backed crypto profiles, it consumes the upstream live pool and does not rebuild monthly pool membership or ordering locally. It does not hold broker credentials, submit orders by itself, or replace the live-pool/release evidence required before a profile is enabled for live runtime settings.
 
 ## Strategy profiles
 
@@ -27,11 +27,11 @@ No direct runtime strategies are exposed from this package.
 
 ### Snapshot-backed strategies
 
-These profiles depend on artifacts produced by `CryptoSnapshotPipelines` before downstream platforms should use them.
+These profiles depend on artifacts produced by `CryptoLivePoolPipelines` before downstream platforms should use them.
 
 | Profile | Name | Notes |
 | --- | --- | --- |
-| `crypto_leader_rotation` | Crypto Leader Rotation | runtime-enabled trend-following rotation that consumes the ordered live pool published by CryptoSnapshotPipelines. Runtime code may gate and size trades inside that pool, but monthly selection and order remain upstream. |
+| `crypto_leader_rotation` | Crypto Leader Rotation | runtime-enabled trend-following rotation that consumes the ordered live pool published by CryptoLivePoolPipelines. Runtime code may gate and size trades inside that pool, but monthly selection and order remain upstream. |
 
 ### Research-only candidates
 
@@ -47,7 +47,7 @@ Use the platform repositories for broker credentials, dry-run/live switches, ord
 
 ## Evidence and live enablement
 
-Use this README as a map of the project, not as live performance data. Before enabling or changing a live profile, rerun the relevant snapshot/backtest pipeline and review short, medium, and long windows: return, max drawdown, benchmark-relative return, turnover, data freshness, and artifact version. Monthly live-pool selection, ranking, and promotion evidence belong in CryptoSnapshotPipelines; strategy changes here should preserve that upstream authority. If evidence is stale, incomplete, or the profile is marked research-only, keep it out of live runtime settings.
+Use this README as a map of the project, not as live performance data. Before enabling or changing a live profile, rerun the relevant live-pool/release pipeline and review short, medium, and long windows: return, max drawdown, benchmark-relative return, turnover, data freshness, and artifact version. Monthly live-pool selection, ranking, and promotion evidence belong in CryptoLivePoolPipelines; strategy changes here should preserve that upstream authority. If evidence is stale, incomplete, or the profile is marked research-only, keep it out of live runtime settings.
 
 ## Repository layout
 
