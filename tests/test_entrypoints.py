@@ -10,8 +10,8 @@ from crypto_strategies import get_strategy_entrypoint
 
 
 class CryptoStrategyEntrypointTests(unittest.TestCase):
-    def test_crypto_leader_rotation_entrypoint_resolves_pool_from_upstream_artifact(self) -> None:
-        entrypoint = get_strategy_entrypoint("crypto_leader_rotation")
+    def test_crypto_live_pool_rotation_entrypoint_resolves_pool_from_upstream_artifact(self) -> None:
+        entrypoint = get_strategy_entrypoint("crypto_live_pool_rotation")
         upstream_pool = ["SOLUSDT", "ETHUSDT"]
         calls: dict[str, object] = {}
 
@@ -105,15 +105,15 @@ class CryptoStrategyEntrypointTests(unittest.TestCase):
         self.assertEqual(decision.diagnostics["ranking_preview"], tuple(upstream_pool))
         self.assertEqual(decision.diagnostics["rotation_pool_source_version"], "2026-03-15-core_major")
 
-    def test_crypto_leader_rotation_entrypoint_uses_authoritative_upstream_pool(self) -> None:
+    def test_crypto_live_pool_rotation_entrypoint_uses_authoritative_upstream_pool(self) -> None:
         try:
-            from crypto_strategies.strategies.crypto_leader_rotation import core as legacy_core
-            from crypto_strategies.strategies.crypto_leader_rotation import rotation as legacy_rotation
+            from crypto_strategies.strategies.crypto_live_pool_rotation import core as legacy_core
+            from crypto_strategies.strategies.crypto_live_pool_rotation import rotation as legacy_rotation
         except ModuleNotFoundError as exc:
             if exc.name == "pandas":
                 self.skipTest("pandas is not installed")
             raise
-        entrypoint = get_strategy_entrypoint("crypto_leader_rotation")
+        entrypoint = get_strategy_entrypoint("crypto_live_pool_rotation")
         prices = {
             "ETHUSDT": 3000.0,
             "SOLUSDT": 180.0,
@@ -278,9 +278,9 @@ class CryptoStrategyEntrypointTests(unittest.TestCase):
             legacy_core.get_dynamic_btc_base_order(account_metrics["total_equity"]),
         )
 
-    def test_crypto_leader_rotation_entrypoint_sets_regime_off_flag_when_btc_regime_is_off(self) -> None:
+    def test_crypto_live_pool_rotation_entrypoint_sets_regime_off_flag_when_btc_regime_is_off(self) -> None:
         try:
-            entrypoint = get_strategy_entrypoint("crypto_leader_rotation")
+            entrypoint = get_strategy_entrypoint("crypto_live_pool_rotation")
         except ModuleNotFoundError as exc:
             if exc.name == "pandas":
                 self.skipTest("pandas is not installed")

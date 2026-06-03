@@ -41,7 +41,7 @@
 
 当前默认是：
 
-- `crypto_leader_rotation` -> `weight`
+- `crypto_live_pool_rotation` -> `weight`
 
 如果以后某个平台原生不吃 `weight`，只能在 runtime 边界做翻译，不能把平台分支写进策略代码。
 
@@ -56,18 +56,18 @@
 - 当策略需要 `ctx.portfolio` 时的 `portfolio_input_name`
 - 当策略依赖上游 artifact 时的 `artifact_contract`
 
-`crypto_leader_rotation` 当前显式声明的 artifact contract 是：
+`crypto_live_pool_rotation` 当前显式声明的 artifact contract 是：
 
 - `requires_snapshot_artifacts = true`
 - `requires_snapshot_manifest_path = true`
-- `snapshot_contract_version = crypto_leader_rotation.live_pool.v1`
+- `snapshot_contract_version = crypto_live_pool_rotation.live_pool.v1`
 - `config_source_policy = none`
 
 策略包负责声明这些需求。下游平台可以决定从 Firestore、GCS、本地文件或状态里取 artifact，但不能再靠 profile 名称分支来猜这条策略需要什么 artifact。
 
 ## live-pool 权威边界
 
-对 `crypto_leader_rotation` 来说，`CryptoLivePoolPipelines` 是月度 live pool 成员、ranking 和顺序的权威来源。执行平台负责校验并保留 `live_pool.json["symbols"]` 的有序列表，然后把它传给 `StrategyContext.market_data["universe_snapshot"]`。
+对 `crypto_live_pool_rotation` 来说，`CryptoLivePoolPipelines` 是月度 live pool 成员、ranking 和顺序的权威来源。执行平台负责校验并保留 `live_pool.json["symbols"]` 的有序列表，然后把它传给 `StrategyContext.market_data["universe_snapshot"]`。
 
 策略代码可以在这个上游池内做运行时门控、卖出规则、top-N 选择、逆波动 sizing、BTC core allocation 和买入预算分配。策略代码不能用本地指标重建月度 live pool，不能用本地 ranking 替换上游顺序，也不能把 research CSV 当作已验证 artifact contract 的替代品。
 
@@ -92,7 +92,7 @@
 
 现在只有一条 live profile：
 
-- `crypto_leader_rotation`
+- `crypto_live_pool_rotation`
 
 现在也只有一个平台 adapter：
 
