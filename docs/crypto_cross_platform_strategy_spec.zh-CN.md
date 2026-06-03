@@ -33,7 +33,7 @@
 - `derived_indicators`：按 symbol 组织的策略级趋势指标
 - `benchmark_snapshot`：基准状态快照，当前是 BTC
 - `portfolio_snapshot`：与交易所无关的组合和现金快照
-- `universe_snapshot`：本轮候选可交易标的集合
+- `universe_snapshot`：来自已验证 `CryptoSnapshotPipelines` artifact 的本轮官方有序 live-pool 标的集合
 
 ## target mode
 
@@ -65,6 +65,12 @@
 
 策略包负责声明这些需求。下游平台可以决定从 Firestore、GCS、本地文件或状态里取 artifact，但不能再靠 profile 名称分支来猜这条策略需要什么 artifact。
 
+## live-pool 权威边界
+
+对 `crypto_leader_rotation` 来说，`CryptoSnapshotPipelines` 是月度 live pool 成员、ranking 和顺序的权威来源。执行平台负责校验并保留 `live_pool.json["symbols"]` 的有序列表，然后把它传给 `StrategyContext.market_data["universe_snapshot"]`。
+
+策略代码可以在这个上游池内做运行时门控、卖出规则、top-N 选择、逆波动 sizing、BTC core allocation 和买入预算分配。策略代码不能用本地指标重建月度 live pool，不能用本地 ranking 替换上游顺序，也不能把 research CSV 当作已验证 artifact contract 的替代品。
+
 ## 允许和禁止
 
 策略代码允许做的事：
@@ -80,6 +86,7 @@
 - 直接读环境变量
 - 直接输出交易所专属下单字段
 - 直接查 artifact 路径或做 artifact 新鲜度校验
+- 为 snapshot-backed profile 在本地重建月度 live pool
 
 ## 当前落地状态
 

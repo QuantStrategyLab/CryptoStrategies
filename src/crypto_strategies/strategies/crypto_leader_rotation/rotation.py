@@ -5,6 +5,18 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 
+def _normalize_symbol_list(symbols):
+    normalized = []
+    seen = set()
+    for value in symbols or ():
+        symbol = str(value or "").strip().upper()
+        if not symbol or symbol in seen:
+            continue
+        normalized.append(symbol)
+        seen.add(symbol)
+    return normalized
+
+
 def _set_rotation_pool_lock(state, *, source_version, source_as_of_date, now_utc):
     locked_version = str(source_version or "").strip()
     locked_as_of_date = str(source_as_of_date or "").strip()
@@ -14,6 +26,46 @@ def _set_rotation_pool_lock(state, *, source_version, source_as_of_date, now_utc
         state["rotation_pool_last_month"] = locked_as_of_date[:7]
     else:
         state["rotation_pool_last_month"] = (now_utc or datetime.now(timezone.utc)).strftime("%Y-%m")
+
+
+def resolve_authoritative_rotation_pool(
+    state,
+    *,
+    trend_universe_symbols,
+    trend_pool_size,
+    allow_refresh=True,
+    now_utc=None,
+):
+    now_utc = now_utc or datetime.now(timezone.utc)
+    upstream_pool = _normalize_symbol_list(trend_universe_symbols)
+    available_symbols = set(upstream_pool)
+    cached_pool = [
+        symbol
+        for symbol in _normalize_symbol_list(state.get("rotation_pool_symbols", []))
+        if not available_symbols or symbol in available_symbols
+    ]
+    current_source_version = str(state.get("trend_pool_version", "")).strip()
+    current_source_as_of_date = str(state.get("trend_pool_as_of_date", "")).strip()
+
+    if not allow_refresh:
+        try:
+            fallback_size = max(0, int(trend_pool_size))
+        except Exception:
+            fallback_size = len(upstream_pool)
+        selected_pool = cached_pool or upstream_pool[:fallback_size]
+    elif upstream_pool:
+        selected_pool = upstream_pool
+    else:
+        selected_pool = cached_pool
+
+    _set_rotation_pool_lock(
+        state,
+        source_version=current_source_version,
+        source_as_of_date=current_source_as_of_date,
+        now_utc=now_utc,
+    )
+    state["rotation_pool_symbols"] = selected_pool
+    return selected_pool
 
 
 def refresh_rotation_pool(

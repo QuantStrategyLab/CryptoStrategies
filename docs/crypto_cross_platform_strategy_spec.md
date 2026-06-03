@@ -32,7 +32,7 @@ Current meaning for the live profile:
 - `derived_indicators`: strategy-ready trend metrics keyed by symbol
 - `benchmark_snapshot`: benchmark regime snapshot, currently BTC
 - `portfolio_snapshot`: exchange-agnostic portfolio and cash snapshot
-- `universe_snapshot`: candidate tradable symbols for this cycle
+- `universe_snapshot`: ordered official live-pool symbols from the validated `CryptoSnapshotPipelines` artifact for this cycle
 
 ## Target mode
 
@@ -66,6 +66,12 @@ The strategy package owns this declaration. Downstream platforms may decide how
 to fetch the artifact, but they should not infer artifact requirements from
 profile-name branches.
 
+## Live-pool authority boundary
+
+For `crypto_leader_rotation`, `CryptoSnapshotPipelines` is the authority for monthly live-pool membership, ranking, and order. The execution platform validates and preserves the ordered `live_pool.json["symbols"]` list, then passes it into `StrategyContext.market_data["universe_snapshot"]`.
+
+Strategy code may apply runtime gates, sell rules, top-N selection, inverse-volatility sizing, BTC core allocation, and buy-budget allocation inside that upstream pool. It must not rebuild the monthly live pool from local indicators, replace the upstream order with a local ranking, or treat research CSVs as a substitute for the validated artifact contract.
+
 ## Allowed and forbidden boundaries
 
 Allowed inside strategy code:
@@ -81,6 +87,7 @@ Forbidden inside strategy code:
 - direct environment reads
 - exchange-specific order payloads
 - artifact-path lookup and freshness validation
+- local monthly live-pool rebuilds for snapshot-backed profiles
 
 ## Current rollout
 

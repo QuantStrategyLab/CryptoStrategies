@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 from quant_platform_kit import PortfolioSnapshot, Position
 from quant_platform_kit.strategy_contracts import StrategyContext
@@ -8,7 +10,102 @@ from crypto_strategies import get_strategy_entrypoint
 
 
 class CryptoStrategyEntrypointTests(unittest.TestCase):
-    def test_crypto_leader_rotation_entrypoint_matches_legacy_budget_and_rotation_outputs(self) -> None:
+    def test_crypto_leader_rotation_entrypoint_resolves_pool_from_upstream_artifact(self) -> None:
+        entrypoint = get_strategy_entrypoint("crypto_leader_rotation")
+        upstream_pool = ["SOLUSDT", "ETHUSDT"]
+        calls: dict[str, object] = {}
+
+        def compute_allocation_budgets(total_equity, cash_usdt, trend_value, dca_value):
+            return {
+                "btc_target_ratio": 0.4,
+                "trend_target_ratio": 0.6,
+                "trend_usdt_pool": 300.0,
+                "dca_usdt_pool": 200.0,
+                "trend_layer_equity": 700.0,
+            }
+
+        def select_rotation_weights(indicators_map, prices, btc_snapshot, candidate_pool, top_n, *, weight_mode):
+            calls["candidate_pool"] = tuple(candidate_pool)
+            return {
+                "SOLUSDT": {
+                    "weight": 1.0,
+                    "relative_score": 1.0,
+                    "abs_momentum": 0.25,
+                }
+            }
+
+        def resolve_authoritative_rotation_pool(state, *, trend_universe_symbols, trend_pool_size, allow_refresh=True, now_utc=None):
+            calls["trend_universe_symbols"] = tuple(trend_universe_symbols)
+            state["rotation_pool_source_version"] = state.get("trend_pool_version", "")
+            state["rotation_pool_source_as_of_date"] = state.get("trend_pool_as_of_date", "")
+            state["rotation_pool_last_month"] = "2026-03"
+            state["rotation_pool_symbols"] = list(upstream_pool)
+            return list(upstream_pool)
+
+        def plan_trend_buys(
+            state,
+            runtime_trend_universe,
+            selected_candidates,
+            trend_indicators,
+            prices,
+            available_trend_buy_budget,
+            allow_new_trend_entries,
+            *,
+            get_symbol_trade_state_fn,
+            allocate_trend_buy_budget_fn,
+        ):
+            calls["runtime_trend_universe"] = tuple(runtime_trend_universe)
+            return ["SOLUSDT"], {"SOLUSDT": 100.0}
+
+        fake_core = SimpleNamespace(
+            compute_allocation_budgets=compute_allocation_budgets,
+            select_rotation_weights=select_rotation_weights,
+            get_dynamic_btc_base_order=lambda total_equity: 15.0,
+            allocate_trend_buy_budget=lambda *args, **kwargs: {},
+        )
+        fake_rotation = SimpleNamespace(
+            resolve_authoritative_rotation_pool=resolve_authoritative_rotation_pool,
+            get_trend_sell_reason=lambda *args, **kwargs: "",
+            plan_trend_buys=plan_trend_buys,
+        )
+
+        with patch(
+            "crypto_strategies.entrypoints._load_legacy_modules",
+            return_value=(fake_core, fake_rotation),
+        ):
+            decision = entrypoint.evaluate(
+                StrategyContext(
+                    as_of="2026-04-06",
+                    market_data={
+                        "market_prices": {"SOLUSDT": 180.0, "ETHUSDT": 3000.0},
+                        "derived_indicators": {
+                            "SOLUSDT": {"sma20": 170.0, "sma60": 160.0, "sma200": 120.0},
+                            "ETHUSDT": {"sma20": 2900.0, "sma60": 2700.0, "sma200": 2300.0},
+                        },
+                        "benchmark_snapshot": {"regime_on": True},
+                        "portfolio_snapshot": PortfolioSnapshot(
+                            as_of="2026-04-06",
+                            total_equity=1000.0,
+                            buying_power=500.0,
+                            cash_balance=500.0,
+                        ),
+                        "universe_snapshot": upstream_pool,
+                    },
+                    state={
+                        "trend_pool_version": "2026-03-15-core_major",
+                        "trend_pool_as_of_date": "2026-03-15",
+                    },
+                )
+            )
+
+        self.assertEqual(calls["trend_universe_symbols"], tuple(upstream_pool))
+        self.assertEqual(calls["candidate_pool"], tuple(upstream_pool))
+        self.assertEqual(calls["runtime_trend_universe"], tuple(upstream_pool))
+        self.assertEqual(decision.diagnostics["trend_pool"], tuple(upstream_pool))
+        self.assertEqual(decision.diagnostics["ranking_preview"], tuple(upstream_pool))
+        self.assertEqual(decision.diagnostics["rotation_pool_source_version"], "2026-03-15-core_major")
+
+    def test_crypto_leader_rotation_entrypoint_uses_authoritative_upstream_pool(self) -> None:
         try:
             from crypto_strategies.strategies.crypto_leader_rotation import core as legacy_core
             from crypto_strategies.strategies.crypto_leader_rotation import rotation as legacy_rotation
@@ -88,6 +185,7 @@ class CryptoStrategyEntrypointTests(unittest.TestCase):
             "trend_pool_version": "2026-03-15-core_major",
             "trend_pool_as_of_date": "2026-03-15",
         }
+        upstream_pool = ["BNBUSDT", "ETHUSDT", "SOLUSDT"]
         expected_budgets = legacy_core.compute_allocation_budgets(
             account_metrics["total_equity"],
             account_metrics["cash_usdt"],
@@ -95,21 +193,10 @@ class CryptoStrategyEntrypointTests(unittest.TestCase):
             account_metrics["dca_value"],
         )
         expected_state = dict(state)
-        expected_pool, ranking = legacy_rotation.refresh_rotation_pool(
+        expected_pool = legacy_rotation.resolve_authoritative_rotation_pool(
             expected_state,
-            trend_indicators,
-            btc_snapshot,
-            trend_universe_symbols=list(prices),
+            trend_universe_symbols=upstream_pool,
             trend_pool_size=entrypoint.manifest.default_config["trend_pool_size"],
-            build_stable_quality_pool_fn=lambda indicators, btc, previous_pool: legacy_core.build_stable_quality_pool(
-                indicators,
-                btc,
-                previous_pool,
-                pool_size=entrypoint.manifest.default_config["trend_pool_size"],
-                min_history_days=entrypoint.manifest.default_config["min_history_days"],
-                min_avg_quote_vol_180=entrypoint.manifest.default_config["min_avg_quote_vol_180"],
-                membership_bonus=entrypoint.manifest.default_config["membership_bonus"],
-            ),
         )
         expected_candidates = legacy_core.select_rotation_weights(
             trend_indicators,
@@ -121,7 +208,7 @@ class CryptoStrategyEntrypointTests(unittest.TestCase):
         )
         expected_eligible_buy_symbols, expected_planned_trend_buys = legacy_rotation.plan_trend_buys(
             dict(expected_state),
-            runtime_trend_universe={symbol: {"base_asset": symbol[:-4]} for symbol in prices},
+            runtime_trend_universe={symbol: {"base_asset": symbol[:-4]} for symbol in upstream_pool},
             selected_candidates=expected_candidates,
             trend_indicators=trend_indicators,
             prices=prices,
@@ -156,7 +243,7 @@ class CryptoStrategyEntrypointTests(unittest.TestCase):
                             "cash_available_for_trading": account_metrics["cash_usdt"],
                         },
                     ),
-                    "universe_snapshot": list(prices),
+                    "universe_snapshot": upstream_pool,
                 },
                 state=state,
                 artifacts={"trend_pool_contract": {"source": "explicit_artifact"}},
@@ -180,7 +267,7 @@ class CryptoStrategyEntrypointTests(unittest.TestCase):
         )
         self.assertEqual(
             tuple(decision.diagnostics["ranking_preview"]),
-            tuple(item["symbol"] for item in ranking[: entrypoint.manifest.default_config["trend_pool_size"]]),
+            tuple(expected_pool[: entrypoint.manifest.default_config["trend_pool_size"]]),
         )
         self.assertEqual(decision.diagnostics["artifact_contract"]["source"], "explicit_artifact")
         self.assertEqual(tuple(decision.diagnostics["eligible_buy_symbols"]), tuple(expected_eligible_buy_symbols))
