@@ -14,7 +14,7 @@ from quant_platform_kit.common.strategies import (
     load_strategy_entrypoint,
 )
 
-CRYPTO_LEADER_ROTATION_PROFILE = "crypto_leader_rotation"
+CRYPTO_LIVE_POOL_ROTATION_PROFILE = "crypto_live_pool_rotation"
 
 CRYPTO_CANONICAL_REQUIRED_INPUTS = frozenset(
     {
@@ -27,10 +27,10 @@ CRYPTO_CANONICAL_REQUIRED_INPUTS = frozenset(
 )
 
 STRATEGY_TARGET_MODES: dict[str, str] = {
-    CRYPTO_LEADER_ROTATION_PROFILE: "weight",
+    CRYPTO_LIVE_POOL_ROTATION_PROFILE: "weight",
 }
 
-CRYPTO_LEADER_ROTATION_DEFAULT_CONFIG = {
+CRYPTO_LIVE_POOL_ROTATION_DEFAULT_CONFIG = {
     "trend_pool_size": 5,
     "rotation_top_n": 2,
     "min_history_days": 365,
@@ -39,40 +39,40 @@ CRYPTO_LEADER_ROTATION_DEFAULT_CONFIG = {
     "weight_mode": "inverse_vol",
     "allow_rotation_refresh": True,
     "atr_multiplier": 2.5,
-    "artifact_contract_version": "crypto_leader_rotation.live_pool.v1",
+    "artifact_contract_version": "crypto_live_pool_rotation.live_pool.v1",
     "artifact_max_age_days": 45,
     "artifact_acceptable_modes": ("core_major",),
 }
 
 STRATEGY_DEFINITIONS: dict[str, StrategyDefinition] = {
-    CRYPTO_LEADER_ROTATION_PROFILE: StrategyDefinition(
-        profile=CRYPTO_LEADER_ROTATION_PROFILE,
+    CRYPTO_LIVE_POOL_ROTATION_PROFILE: StrategyDefinition(
+        profile=CRYPTO_LIVE_POOL_ROTATION_PROFILE,
         domain=CRYPTO_DOMAIN,
         supported_platforms=frozenset({"binance"}),
         components=(
             StrategyComponentDefinition(
                 name="core",
-                module_path="crypto_strategies.strategies.crypto_leader_rotation.core",
+                module_path="crypto_strategies.strategies.crypto_live_pool_rotation.core",
             ),
             StrategyComponentDefinition(
                 name="rotation",
-                module_path="crypto_strategies.strategies.crypto_leader_rotation.rotation",
+                module_path="crypto_strategies.strategies.crypto_live_pool_rotation.rotation",
             ),
         ),
         entrypoint=StrategyEntrypointDefinition(
             module_path="crypto_strategies.entrypoints",
-            attribute_name="crypto_leader_rotation_entrypoint",
+            attribute_name="crypto_live_pool_rotation_entrypoint",
         ),
         required_inputs=CRYPTO_CANONICAL_REQUIRED_INPUTS,
-        default_config=CRYPTO_LEADER_ROTATION_DEFAULT_CONFIG,
-        target_mode=STRATEGY_TARGET_MODES[CRYPTO_LEADER_ROTATION_PROFILE],
+        default_config=CRYPTO_LIVE_POOL_ROTATION_DEFAULT_CONFIG,
+        target_mode=STRATEGY_TARGET_MODES[CRYPTO_LIVE_POOL_ROTATION_PROFILE],
     ),
 }
 
 STRATEGY_METADATA: dict[str, StrategyMetadata] = {
-    CRYPTO_LEADER_ROTATION_PROFILE: StrategyMetadata(
-        canonical_profile=CRYPTO_LEADER_ROTATION_PROFILE,
-        display_name="Crypto Leader Rotation",
+    CRYPTO_LIVE_POOL_ROTATION_PROFILE: StrategyMetadata(
+        canonical_profile=CRYPTO_LIVE_POOL_ROTATION_PROFILE,
+        display_name="Crypto Live Pool Rotation",
         description="Trend-following crypto rotation with staged entries, degradation controls, and cash parking.",
         aliases=(),
         cadence="daily",

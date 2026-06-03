@@ -11,14 +11,14 @@ from quant_platform_kit.strategy_contracts import (
     StrategyDecision,
 )
 
-from crypto_strategies.manifests import crypto_leader_rotation_manifest
+from crypto_strategies.manifests import crypto_live_pool_rotation_manifest
 
 
 """Unified crypto strategy entrypoints built on top of legacy core/rotation modules."""
 
 
 def _merge_runtime_config(ctx: StrategyContext) -> dict[str, object]:
-    config = dict(crypto_leader_rotation_manifest.default_config)
+    config = dict(crypto_live_pool_rotation_manifest.default_config)
     config.update(dict(ctx.runtime_config))
     return config
 
@@ -110,13 +110,13 @@ def _resolve_state_helpers(config: Mapping[str, object]):
 
 
 def _load_legacy_modules():
-    from crypto_strategies.strategies.crypto_leader_rotation import core as legacy_core
-    from crypto_strategies.strategies.crypto_leader_rotation import rotation as legacy_rotation
+    from crypto_strategies.strategies.crypto_live_pool_rotation import core as legacy_core
+    from crypto_strategies.strategies.crypto_live_pool_rotation import rotation as legacy_rotation
 
     return legacy_core, legacy_rotation
 
 
-def evaluate_crypto_leader_rotation(ctx: StrategyContext) -> StrategyDecision:
+def evaluate_crypto_live_pool_rotation(ctx: StrategyContext) -> StrategyDecision:
     legacy_core, legacy_rotation = _load_legacy_modules()
     config = _merge_runtime_config(ctx)
     prices = _require_market_data(ctx, "market_prices")
@@ -256,10 +256,10 @@ def evaluate_crypto_leader_rotation(ctx: StrategyContext) -> StrategyDecision:
     )
 
 
-crypto_leader_rotation_entrypoint = CallableStrategyEntrypoint(
-    manifest=crypto_leader_rotation_manifest,
-    _evaluate=evaluate_crypto_leader_rotation,
+crypto_live_pool_rotation_entrypoint = CallableStrategyEntrypoint(
+    manifest=crypto_live_pool_rotation_manifest,
+    _evaluate=evaluate_crypto_live_pool_rotation,
 )
 
 
-__all__ = ["crypto_leader_rotation_entrypoint", "evaluate_crypto_leader_rotation"]
+__all__ = ["crypto_live_pool_rotation_entrypoint", "evaluate_crypto_live_pool_rotation"]

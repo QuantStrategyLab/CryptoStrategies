@@ -14,7 +14,7 @@ from crypto_strategies.manifests import get_strategy_manifest
 from crypto_strategies.runtime_adapters import (
     BINANCE_PLATFORM,
     CRYPTO_CANONICAL_REQUIRED_INPUTS,
-    CRYPTO_LEADER_ROTATION_ARTIFACT_CONTRACT,
+    CRYPTO_LIVE_POOL_ROTATION_ARTIFACT_CONTRACT,
     PLATFORM_RUNTIME_ADAPTERS,
     get_platform_runtime_adapter,
 )
@@ -59,13 +59,13 @@ class ContractGovernanceTests(unittest.TestCase):
                         self.assertTrue(adapter.portfolio_input_name)
 
     def test_live_profiles_declare_explicit_artifact_contract(self) -> None:
-        adapter = get_platform_runtime_adapter("crypto_leader_rotation", platform_id=BINANCE_PLATFORM)
+        adapter = get_platform_runtime_adapter("crypto_live_pool_rotation", platform_id=BINANCE_PLATFORM)
         contract = resolve_strategy_artifact_contract(adapter)
 
-        self.assertEqual(contract, CRYPTO_LEADER_ROTATION_ARTIFACT_CONTRACT)
+        self.assertEqual(contract, CRYPTO_LIVE_POOL_ROTATION_ARTIFACT_CONTRACT)
         self.assertTrue(contract.requires_snapshot_artifacts)
         self.assertTrue(contract.requires_snapshot_manifest_path)
-        self.assertEqual(contract.snapshot_contract_version, "crypto_leader_rotation.live_pool.v1")
+        self.assertEqual(contract.snapshot_contract_version, "crypto_live_pool_rotation.live_pool.v1")
         self.assertEqual(contract.config_source_policy, "none")
 
     def test_runtime_adapter_map_matches_catalog_compatibility(self) -> None:

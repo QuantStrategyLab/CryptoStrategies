@@ -3,10 +3,10 @@ from __future__ import annotations
 from quant_platform_kit.strategy_contracts import StrategyManifest
 
 
-crypto_leader_rotation_manifest = StrategyManifest(
-    profile="crypto_leader_rotation",
+crypto_live_pool_rotation_manifest = StrategyManifest(
+    profile="crypto_live_pool_rotation",
     domain="crypto",
-    display_name="Crypto Leader Rotation",
+    display_name="Crypto Live Pool Rotation",
     description="Trend-following crypto rotation with staged entries, degradation controls, and cash parking.",
     required_inputs=frozenset(
         {
@@ -26,17 +26,17 @@ crypto_leader_rotation_manifest = StrategyManifest(
         "weight_mode": "inverse_vol",
         "allow_rotation_refresh": True,
         "atr_multiplier": 2.5,
-        "artifact_contract_version": "crypto_leader_rotation.live_pool.v1",
+        "artifact_contract_version": "crypto_live_pool_rotation.live_pool.v1",
         "artifact_max_age_days": 45,
         "artifact_acceptable_modes": ("core_major",),
     },
 )
 
-MANIFESTS = {crypto_leader_rotation_manifest.profile: crypto_leader_rotation_manifest}
+MANIFESTS = {crypto_live_pool_rotation_manifest.profile: crypto_live_pool_rotation_manifest}
 
 
 def get_strategy_manifest(profile: str) -> StrategyManifest:
     return MANIFESTS[profile]
 
 
-__all__ = ["MANIFESTS", "crypto_leader_rotation_manifest", "get_strategy_manifest"]
+__all__ = ["MANIFESTS", "crypto_live_pool_rotation_manifest", "get_strategy_manifest"]

@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import unittest
 
-from crypto_strategies.strategies.crypto_leader_rotation.rotation import resolve_authoritative_rotation_pool
+from crypto_strategies.strategies.crypto_live_pool_rotation.rotation import resolve_authoritative_rotation_pool
 
 
 class RotationAuthorityTests(unittest.TestCase):
