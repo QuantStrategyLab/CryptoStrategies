@@ -1,5 +1,36 @@
 # CryptoStrategies
 
+<!-- qsl-doc-overview:start -->
+
+> ⚠️ 投资有风险，不构成投资建议，仅供学习交流用途。
+> ⚠️ Investing involves risk. This project does not provide investment advice and is for educational and research purposes only.
+
+## Open-source overview / 开源项目入口
+
+| Item | Description |
+| --- | --- |
+| Project type | strategy package |
+| What it does | Shared crypto strategy implementations and metadata for QuantStrategyLab crypto runtimes. |
+| 中文说明 | 加密资产策略实现与元数据包，供 Binance 等 crypto runtime 加载。 |
+| Current status | Strategy package; execution happens in platform repositories such as BinancePlatform. |
+
+### Quick start
+
+- `python -m pip install -e '.[test]'`
+- `python -m pytest -q`
+
+### Deploy / operate safely
+
+Do not deploy from this repo directly. Update downstream runtime configs and run platform dry-runs first.
+
+### Strategy performance / evidence boundary
+
+Performance and backtest evidence should be reviewed in the strategy docs or CryptoSnapshotPipelines artifacts before runtime enablement.
+
+> Detailed runbooks, migration notes, workflow internals, and historical decisions are kept below. Start with this overview before using the lower-level operational sections.
+
+<!-- qsl-doc-overview:end -->
+
 > ⚠️ 投资有风险，不构成投资建议，仅供学习交流用途。
 
 [English](#english) | [中文](#中文)
