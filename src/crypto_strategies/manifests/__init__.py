@@ -8,6 +8,7 @@ crypto_live_pool_rotation_manifest = StrategyManifest(
     domain="crypto",
     display_name="Crypto Live Pool Rotation",
     description="Trend-following crypto rotation with staged entries, degradation controls, and cash parking.",
+    aliases=("crypto_leader_rotation",),
     required_inputs=frozenset(
         {
             "market_prices",

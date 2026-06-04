@@ -31,7 +31,7 @@ These profiles depend on artifacts produced by `CryptoLivePoolPipelines` before 
 
 | Profile | Name | Notes |
 | --- | --- | --- |
-| `crypto_live_pool_rotation` | Crypto Live Pool Rotation | runtime-enabled trend-following rotation that consumes the ordered live pool published by CryptoLivePoolPipelines. Runtime code may gate and size trades inside that pool, but monthly selection and order remain upstream. |
+| `crypto_live_pool_rotation` | Crypto Live Pool Rotation | runtime-enabled trend-following rotation that consumes the ordered live pool published by CryptoLivePoolPipelines. The legacy `crypto_leader_rotation` profile remains an alias for compatibility. Runtime code may gate and size trades inside that pool, but monthly selection and order remain upstream. |
 
 ### Research-only candidates
 

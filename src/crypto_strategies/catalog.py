@@ -15,6 +15,8 @@ from quant_platform_kit.common.strategies import (
 )
 
 CRYPTO_LIVE_POOL_ROTATION_PROFILE = "crypto_live_pool_rotation"
+CRYPTO_LEADER_ROTATION_PROFILE = "crypto_leader_rotation"
+CRYPTO_LIVE_POOL_ROTATION_ALIASES = (CRYPTO_LEADER_ROTATION_PROFILE,)
 
 CRYPTO_CANONICAL_REQUIRED_INPUTS = frozenset(
     {
@@ -74,7 +76,7 @@ STRATEGY_METADATA: dict[str, StrategyMetadata] = {
         canonical_profile=CRYPTO_LIVE_POOL_ROTATION_PROFILE,
         display_name="Crypto Live Pool Rotation",
         description="Trend-following crypto rotation with staged entries, degradation controls, and cash parking.",
-        aliases=(),
+        aliases=CRYPTO_LIVE_POOL_ROTATION_ALIASES,
         cadence="daily",
         asset_scope="liquid_crypto_assets",
         benchmark="BTC",

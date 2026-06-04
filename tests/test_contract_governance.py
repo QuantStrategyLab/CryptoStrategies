@@ -89,6 +89,7 @@ class ContractGovernanceTests(unittest.TestCase):
                 self.assertEqual(manifest.profile, definition.profile)
                 self.assertEqual(manifest.domain, definition.domain)
                 self.assertEqual(manifest.display_name, metadata.display_name)
+                self.assertEqual(manifest.aliases, metadata.aliases)
                 self.assertEqual(manifest.required_inputs, definition.required_inputs)
                 self.assertEqual(dict(manifest.default_config), dict(definition.default_config))
 
@@ -106,6 +107,7 @@ class ContractGovernanceTests(unittest.TestCase):
                 self.assertEqual(entrypoint.manifest.profile, definition.profile)
                 self.assertEqual(entrypoint.manifest.domain, definition.domain)
                 self.assertEqual(entrypoint.manifest.display_name, metadata.display_name)
+                self.assertEqual(entrypoint.manifest.aliases, metadata.aliases)
                 self.assertEqual(entrypoint.manifest.required_inputs, definition.required_inputs)
 
     def test_strategy_index_rows_expose_expected_contract_fields(self) -> None:
