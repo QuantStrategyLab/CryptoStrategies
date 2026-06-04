@@ -1,6 +1,8 @@
 from .catalog import (
     STRATEGY_CATALOG,
     STRATEGY_DEFINITIONS,
+    CRYPTO_LEADER_ROTATION_PROFILE,
+    CRYPTO_LIVE_POOL_ROTATION_PROFILE,
     get_strategy_catalog,
     get_strategy_definition,
     get_strategy_definitions,
@@ -16,6 +18,8 @@ from .runtime_adapters import (
 __all__ = [
     "STRATEGY_CATALOG",
     "STRATEGY_DEFINITIONS",
+    "CRYPTO_LEADER_ROTATION_PROFILE",
+    "CRYPTO_LIVE_POOL_ROTATION_PROFILE",
     "PLATFORM_RUNTIME_ADAPTERS",
     "get_strategy_catalog",
     "get_strategy_definition",

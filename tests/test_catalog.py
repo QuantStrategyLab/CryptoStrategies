@@ -4,8 +4,10 @@ from quant_platform_kit.common.strategies import get_strategy_component_map
 from crypto_strategies import get_strategy_definitions
 from crypto_strategies.catalog import (
     CRYPTO_CANONICAL_REQUIRED_INPUTS,
+    CRYPTO_LEADER_ROTATION_PROFILE,
     CRYPTO_LIVE_POOL_ROTATION_PROFILE,
     get_strategy_definition,
+    get_strategy_metadata,
 )
 from crypto_strategies.runtime_adapters import BINANCE_PLATFORM, get_platform_runtime_adapter
 
@@ -33,6 +35,14 @@ class CatalogTest(unittest.TestCase):
             rotation_module.module_path,
             "crypto_strategies.strategies.crypto_live_pool_rotation.rotation",
         )
+
+    def test_legacy_leader_rotation_profile_resolves_to_live_pool_rotation(self):
+        definition = get_strategy_definition(CRYPTO_LEADER_ROTATION_PROFILE)
+        metadata = get_strategy_metadata(CRYPTO_LEADER_ROTATION_PROFILE)
+
+        self.assertEqual(definition.profile, CRYPTO_LIVE_POOL_ROTATION_PROFILE)
+        self.assertEqual(metadata.canonical_profile, CRYPTO_LIVE_POOL_ROTATION_PROFILE)
+        self.assertIn(CRYPTO_LEADER_ROTATION_PROFILE, metadata.aliases)
 
     def test_runtime_adapter_covers_canonical_inputs(self):
         definition = get_strategy_definition(CRYPTO_LIVE_POOL_ROTATION_PROFILE)

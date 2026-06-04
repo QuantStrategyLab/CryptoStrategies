@@ -31,7 +31,7 @@ CryptoStrategies 是 QuantStrategyLab 的加密货币策略包。为 Binance 执
 
 | Profile | 名称 | 说明 |
 | --- | --- | --- |
-| `crypto_live_pool_rotation` | Crypto Live Pool Rotation | 消费 CryptoLivePoolPipelines 发布的有序 live pool 的趋势轮动策略。运行时代码可以在该池内做交易门控和仓位 sizing，但月度选池和排序属于上游。 |
+| `crypto_live_pool_rotation` | 加密领涨轮动 | 消费 CryptoLivePoolPipelines 发布的有序 live pool 的趋势轮动策略。兼容旧 profile `crypto_leader_rotation`；运行时代码可以在该池内做交易门控和仓位 sizing，但月度选池和排序属于上游。 |
 
 ### 研究侧候选
 
