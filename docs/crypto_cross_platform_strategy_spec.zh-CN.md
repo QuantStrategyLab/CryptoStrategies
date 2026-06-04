@@ -1,14 +1,6 @@
 # 加密策略跨平台规范
 
-
-## English summary
-
-- Full English version: [`crypto_cross_platform_strategy_spec.md`](crypto_cross_platform_strategy_spec.md). This summary keeps an English entry point in the Chinese file.
-- Purpose: this document covers `加密策略跨平台规范` for `CryptoStrategies`.
-- Main topics: `canonical 输入集合`, `target mode`, `runtime adapter`, `允许和禁止`, `当前落地状态`.
-- Read the boundaries, inputs, outputs, and permission requirements before running commands, CI jobs, dry-runs, releases, or runtime switches.
-- For live trading, secrets, Cloud Run, exchange, or broker API changes, validate in test or dry-run mode first and do not change production only from examples.
-- If this summary differs from the detailed Chinese body, follow the concrete commands, configuration keys, and constraints in the body.
+[English](crypto_cross_platform_strategy_spec.md)
 
 这个仓库现在按照美股那套边界来拆：
 
