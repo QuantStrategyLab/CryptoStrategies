@@ -284,6 +284,15 @@ def get_strategy_definitions() -> dict[str, StrategyDefinition]:
     return dict(STRATEGY_DEFINITIONS)
 
 
+def get_runtime_enabled_profiles() -> frozenset[str]:
+    """Return the set of strategy profiles allowed to run on this platform.
+
+    This defines the rollout allowlist — the upper bound of what profiles
+    may be enabled.  By default all defined profiles are allowed.
+    """
+    return frozenset(STRATEGY_DEFINITIONS)
+
+
 def get_strategy_catalog() -> StrategyCatalog:
     return STRATEGY_CATALOG
 
