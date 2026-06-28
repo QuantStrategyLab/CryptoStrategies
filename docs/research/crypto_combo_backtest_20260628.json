@@ -1,0 +1,86 @@
+{
+  "Pure BTC DCA": {
+    "metrics": {
+      "Full Period": {
+        "annual_return": 3.3491,
+        "max_drawdown": -0.494,
+        "sharpe": 2.1603,
+        "total_return": 2807.5486
+      },
+      "Bear (2022)": {
+        "annual_return": 0.0551,
+        "max_drawdown": -0.494,
+        "sharpe": 0.4048,
+        "total_return": 0.055
+      },
+      "Bull (2023-2024)": {
+        "annual_return": 2.2343,
+        "max_drawdown": -0.2211,
+        "sharpe": 2.6451,
+        "total_return": 9.4778
+      },
+      "Recent (2025-2026)": {
+        "annual_return": -0.1914,
+        "max_drawdown": -0.4852,
+        "sharpe": -0.2542,
+        "total_return": -0.2709
+      }
+    }
+  },
+  "Static Combo": {
+    "metrics": {
+      "Full Period": {
+        "annual_return": 3.0893,
+        "max_drawdown": -0.4686,
+        "sharpe": 2.1999,
+        "total_return": 2012.8024
+      },
+      "Bear (2022)": {
+        "annual_return": 0.2114,
+        "max_drawdown": -0.3713,
+        "sharpe": 0.6506,
+        "total_return": 0.2113
+      },
+      "Bull (2023-2024)": {
+        "annual_return": 1.5004,
+        "max_drawdown": -0.3071,
+        "sharpe": 2.2923,
+        "total_return": 5.2597
+      },
+      "Recent (2025-2026)": {
+        "annual_return": -0.1811,
+        "max_drawdown": -0.4686,
+        "sharpe": -0.2582,
+        "total_return": -0.2569
+      }
+    }
+  },
+  "Dynamic Combo": {
+    "metrics": {
+      "Full Period": {
+        "annual_return": 3.155,
+        "max_drawdown": -0.4835,
+        "sharpe": 2.1949,
+        "total_return": 2193.6515
+      },
+      "Bear (2022)": {
+        "annual_return": 0.1522,
+        "max_drawdown": -0.4118,
+        "sharpe": 0.5348,
+        "total_return": 0.1521
+      },
+      "Bull (2023-2024)": {
+        "annual_return": 1.7074,
+        "max_drawdown": -0.2989,
+        "sharpe": 2.3693,
+        "total_return": 6.3398
+      },
+      "Recent (2025-2026)": {
+        "annual_return": -0.1949,
+        "max_drawdown": -0.4835,
+        "sharpe": -0.2729,
+        "total_return": -0.2755
+      }
+    }
+  }
+}

@@ -11,14 +11,19 @@ from quant_platform_kit.strategy_contracts import (
     StrategyDecision,
 )
 
-from crypto_strategies.manifests import crypto_live_pool_rotation_manifest
+from crypto_strategies.manifests import (
+    crypto_btc_dca_manifest,
+    crypto_equity_combo_manifest,
+    crypto_live_pool_rotation_manifest,
+    crypto_trend_rotation_manifest,
+)
 
 
 """Unified crypto strategy entrypoints built on top of legacy core/rotation modules."""
 
 
-def _merge_runtime_config(ctx: StrategyContext) -> dict[str, object]:
-    config = dict(crypto_live_pool_rotation_manifest.default_config)
+def _merge_runtime_config(ctx: StrategyContext, manifest_config: Mapping[str, object]) -> dict[str, object]:
+    config = dict(manifest_config)
     config.update(dict(ctx.runtime_config))
     return config
 
@@ -118,7 +123,7 @@ def _load_legacy_modules():
 
 def evaluate_crypto_live_pool_rotation(ctx: StrategyContext) -> StrategyDecision:
     legacy_core, legacy_rotation = _load_legacy_modules()
-    config = _merge_runtime_config(ctx)
+    config = _merge_runtime_config(ctx, crypto_live_pool_rotation_manifest.default_config)
     prices = _require_market_data(ctx, "market_prices")
     indicators_map = _require_market_data(ctx, "derived_indicators")
     btc_snapshot = _require_market_data(ctx, "benchmark_snapshot")
@@ -262,4 +267,226 @@ crypto_live_pool_rotation_entrypoint = CallableStrategyEntrypoint(
 )
 
 
-__all__ = ["crypto_live_pool_rotation_entrypoint", "evaluate_crypto_live_pool_rotation"]
+# ---------------------------------------------------------------------------
+# crypto_btc_dca entrypoint
+# ---------------------------------------------------------------------------
+
+def evaluate_crypto_btc_dca(ctx: StrategyContext) -> StrategyDecision:
+    from crypto_strategies.strategies.crypto_btc_dca import compute_signals
+
+    prices = _require_market_data(ctx, "market_prices")
+    portfolio = _resolve_portfolio_snapshot(ctx)
+    account_metrics = _resolve_account_metrics(ctx)
+    total_equity = account_metrics["total_equity"]
+
+    result = compute_signals(
+        prices=prices,
+        portfolio=portfolio,
+        total_equity=total_equity,
+        state=dict(ctx.state),
+    )
+
+    btc_target_ratio = float(result.get("btc_target_ratio", 0.0))
+    positions = [
+        PositionTarget(
+            symbol="BTCUSDT",
+            target_weight=btc_target_ratio,
+            role="core",
+        ),
+    ]
+
+    budget_intents = (
+        BudgetIntent(
+            name="btc_dca_pool",
+            symbol="BTCUSDT",
+            amount=total_equity * btc_target_ratio,
+            purpose="btc_core_accumulation",
+        ),
+    )
+
+    risk_flags: tuple[str, ...] = ()
+    if btc_target_ratio <= 0.0:
+        risk_flags += ("no_btc_allocation",)
+
+    diagnostics = {
+        "btc_target_ratio": btc_target_ratio,
+        "total_equity": total_equity,
+        "profile": result.get("profile"),
+    }
+
+    return StrategyDecision(
+        positions=tuple(positions),
+        budgets=budget_intents,
+        risk_flags=risk_flags,
+        diagnostics=diagnostics,
+    )
+
+
+crypto_btc_dca_entrypoint = CallableStrategyEntrypoint(
+    manifest=crypto_btc_dca_manifest,
+    _evaluate=evaluate_crypto_btc_dca,
+)
+
+
+# ---------------------------------------------------------------------------
+# crypto_trend_rotation entrypoint
+# ---------------------------------------------------------------------------
+
+def evaluate_crypto_trend_rotation(ctx: StrategyContext) -> StrategyDecision:
+    from crypto_strategies.strategies.crypto_trend_rotation import compute_signals
+
+    config = _merge_runtime_config(ctx, crypto_trend_rotation_manifest.default_config)
+    feature_snapshot = _require_market_data(ctx, "derived_indicators")
+    prices = _require_market_data(ctx, "market_prices")
+
+    # Build a feature_snapshot from indicators_map
+    import pandas as pd
+    rows = []
+    for symbol, indicators in feature_snapshot.items():
+        row = dict(indicators)
+        row["symbol"] = symbol
+        rows.append(row)
+    feature_frame = pd.DataFrame(rows) if rows else pd.DataFrame()
+
+    weights, signal_desc, is_emergency, debug_str, metadata = compute_signals(
+        feature_snapshot=feature_frame,
+        current_holdings=list(prices.keys()),
+        trend_pool_size=int(config.get("trend_pool_size", 5)),
+        rotation_top_n=int(config.get("rotation_top_n", 2)),
+        weight_mode=str(config.get("weight_mode", "inverse_vol")),
+        allow_rotation_refresh=bool(config.get("allow_rotation_refresh", True)),
+        atr_multiplier=float(config.get("atr_multiplier", 2.5)),
+    )
+
+    positions: list[PositionTarget] = []
+    if weights is not None:
+        for symbol, weight in sorted(weights.items()):
+            positions.append(
+                PositionTarget(
+                    symbol=symbol,
+                    target_weight=float(weight),
+                    role="trend_rotation",
+                )
+            )
+
+    budget_intents = (
+        BudgetIntent(
+            name="trend_rotation_pool",
+            amount=0.0,
+            purpose="trend_rotation",
+        ),
+    )
+
+    risk_flags: tuple[str, ...] = ()
+    if is_emergency:
+        risk_flags += ("emergency",)
+    if not weights:
+        risk_flags += ("no_trend_candidates",)
+
+    diagnostics = {
+        "signal_desc": signal_desc,
+        "debug_str": debug_str,
+        "metadata": metadata,
+        "managed_symbols": metadata.get("managed_symbols", ()),
+        "profile": metadata.get("profile"),
+    }
+
+    return StrategyDecision(
+        positions=tuple(positions),
+        budgets=budget_intents,
+        risk_flags=risk_flags,
+        diagnostics=diagnostics,
+    )
+
+
+crypto_trend_rotation_entrypoint = CallableStrategyEntrypoint(
+    manifest=crypto_trend_rotation_manifest,
+    _evaluate=evaluate_crypto_trend_rotation,
+)
+
+
+# ---------------------------------------------------------------------------
+# crypto_equity_combo entrypoint
+# ---------------------------------------------------------------------------
+
+def evaluate_crypto_equity_combo(ctx: StrategyContext) -> StrategyDecision:
+    from crypto_strategies.strategies.crypto_equity_combo import compute_signals
+
+    config = _merge_runtime_config(ctx, crypto_equity_combo_manifest.default_config)
+    prices = _require_market_data(ctx, "market_prices")
+    indicators_map = _require_market_data(ctx, "derived_indicators")
+    benchmark_snapshot = _require_market_data(ctx, "benchmark_snapshot")
+    portfolio = _resolve_portfolio_snapshot(ctx)
+    universe_snapshot = list(_require_market_data(ctx, "universe_snapshot"))
+
+    weights, signal_desc, has_cash_residual, status_desc, metadata = compute_signals(
+        prices=prices,
+        indicators_map=indicators_map,
+        universe_snapshot=universe_snapshot,
+        benchmark_snapshot=benchmark_snapshot,
+        portfolio=portfolio,
+        state=dict(ctx.state),
+        btc_weight=float(config.get("btc_weight", 0.30)),
+        trend_weight=float(config.get("trend_weight", 0.70)),
+        dynamic_mode=bool(config.get("dynamic_mode", True)),
+    )
+
+    positions: list[PositionTarget] = []
+    if weights:
+        for symbol, weight in sorted(weights.items()):
+            positions.append(
+                PositionTarget(
+                    symbol=symbol,
+                    target_weight=float(weight),
+                    role=("core" if symbol == "BTCUSDT" else "trend_rotation"),
+                )
+            )
+
+    budget_intents = (
+        BudgetIntent(
+            name="combo_pool",
+            amount=0.0,
+            purpose="combined_allocation",
+        ),
+    )
+
+    risk_flags: tuple[str, ...] = ()
+    if metadata.get("regime_off"):
+        risk_flags += ("regime_off",)
+    if has_cash_residual:
+        risk_flags += ("cash_residual",)
+    if not weights:
+        risk_flags += ("no_positions",)
+
+    diagnostics = {
+        "signal_desc": signal_desc,
+        "status_desc": status_desc,
+        "metadata": metadata,
+        "managed_symbols": metadata.get("managed_symbols", ()),
+        "profile": metadata.get("profile"),
+    }
+
+    return StrategyDecision(
+        positions=tuple(positions),
+        budgets=budget_intents,
+        risk_flags=risk_flags,
+        diagnostics=diagnostics,
+    )
+
+
+crypto_equity_combo_entrypoint = CallableStrategyEntrypoint(
+    manifest=crypto_equity_combo_manifest,
+    _evaluate=evaluate_crypto_equity_combo,
+)
+
+
+__all__ = [
+    "crypto_live_pool_rotation_entrypoint",
+    "evaluate_crypto_live_pool_rotation",
+    "crypto_btc_dca_entrypoint",
+    "evaluate_crypto_btc_dca",
+    "crypto_trend_rotation_entrypoint",
+    "evaluate_crypto_trend_rotation",
+    "crypto_equity_combo_entrypoint",
+    "evaluate_crypto_equity_combo",
+]
