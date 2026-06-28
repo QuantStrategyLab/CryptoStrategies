@@ -274,19 +274,27 @@ crypto_live_pool_rotation_entrypoint = CallableStrategyEntrypoint(
 def evaluate_crypto_btc_dca(ctx: StrategyContext) -> StrategyDecision:
     from crypto_strategies.strategies.crypto_btc_dca import compute_signals
 
+    config = _merge_runtime_config(ctx, crypto_btc_dca_manifest.default_config)
     prices = _require_market_data(ctx, "market_prices")
     portfolio = _resolve_portfolio_snapshot(ctx)
     account_metrics = _resolve_account_metrics(ctx)
     total_equity = account_metrics["total_equity"]
+    derived_indicators = ctx.market_data.get("derived_indicators")
+    translator = _resolve_translator(config)
 
     result = compute_signals(
         prices=prices,
         portfolio=portfolio,
         total_equity=total_equity,
         state=dict(ctx.state),
+        derived_indicators=derived_indicators,
+        translator=translator,
+        **config,
     )
 
     btc_target_ratio = float(result.get("btc_target_ratio", 0.0))
+    metadata = result.get("metadata", {}) if isinstance(result.get("metadata"), dict) else {}
+
     positions = [
         PositionTarget(
             symbol="BTCUSDT",
@@ -307,11 +315,23 @@ def evaluate_crypto_btc_dca(ctx: StrategyContext) -> StrategyDecision:
     risk_flags: tuple[str, ...] = ()
     if btc_target_ratio <= 0.0:
         risk_flags += ("no_btc_allocation",)
+    if not metadata.get("actionable", True):
+        risk_flags += ("no_execute",)
 
     diagnostics = {
         "btc_target_ratio": btc_target_ratio,
         "total_equity": total_equity,
         "profile": result.get("profile"),
+        "signal_description": metadata.get("signal_description", ""),
+        "status_description": metadata.get("status_description", ""),
+        "regime": metadata.get("regime", "ordinary_dca"),
+        "multiplier": metadata.get("multiplier", 1.0),
+        "smart_multiplier_enabled": metadata.get("smart_multiplier_enabled", True),
+        "planned_investment_usd": metadata.get("planned_investment_usd", 0.0),
+        "in_execution_window": metadata.get("in_execution_window", True),
+        "zscore_exit": metadata.get("zscore_exit", {}),
+        "ahr999": metadata.get("ahr999", float("nan")),
+        "mayer_multiple": metadata.get("mayer_multiple", float("nan")),
     }
 
     return StrategyDecision(
@@ -338,6 +358,7 @@ def evaluate_crypto_trend_rotation(ctx: StrategyContext) -> StrategyDecision:
     config = _merge_runtime_config(ctx, crypto_trend_rotation_manifest.default_config)
     feature_snapshot = _require_market_data(ctx, "derived_indicators")
     prices = _require_market_data(ctx, "market_prices")
+    translator = _resolve_translator(config)
 
     # Build a feature_snapshot from indicators_map
     import pandas as pd
@@ -351,11 +372,15 @@ def evaluate_crypto_trend_rotation(ctx: StrategyContext) -> StrategyDecision:
     weights, signal_desc, is_emergency, debug_str, metadata = compute_signals(
         feature_snapshot=feature_frame,
         current_holdings=list(prices.keys()),
+        translator=translator,
         trend_pool_size=int(config.get("trend_pool_size", 5)),
         rotation_top_n=int(config.get("rotation_top_n", 2)),
         weight_mode=str(config.get("weight_mode", "inverse_vol")),
         allow_rotation_refresh=bool(config.get("allow_rotation_refresh", True)),
         atr_multiplier=float(config.get("atr_multiplier", 2.5)),
+        circuit_breaker_enabled=bool(config.get("circuit_breaker_enabled", True)),
+        btc_drawdown_threshold=float(config.get("btc_drawdown_threshold", 0.30)),
+        vol_scaling_enabled=bool(config.get("vol_scaling_enabled", True)),
     )
 
     positions: list[PositionTarget] = []
@@ -418,6 +443,7 @@ def evaluate_crypto_equity_combo(ctx: StrategyContext) -> StrategyDecision:
     benchmark_snapshot = _require_market_data(ctx, "benchmark_snapshot")
     portfolio = _resolve_portfolio_snapshot(ctx)
     universe_snapshot = list(_require_market_data(ctx, "universe_snapshot"))
+    translator = _resolve_translator(config)
 
     weights, signal_desc, has_cash_residual, status_desc, metadata = compute_signals(
         prices=prices,
@@ -426,9 +452,15 @@ def evaluate_crypto_equity_combo(ctx: StrategyContext) -> StrategyDecision:
         benchmark_snapshot=benchmark_snapshot,
         portfolio=portfolio,
         state=dict(ctx.state),
+        translator=translator,
         btc_weight=float(config.get("btc_weight", 0.30)),
         trend_weight=float(config.get("trend_weight", 0.70)),
         dynamic_mode=bool(config.get("dynamic_mode", True)),
+        smart_multiplier_enabled=bool(config.get("smart_multiplier_enabled", True)),
+        cycle_indicator_enabled=bool(config.get("cycle_indicator_enabled", True)),
+        zscore_exit_enabled=bool(config.get("zscore_exit_enabled", True)),
+        circuit_breaker_enabled=bool(config.get("circuit_breaker_enabled", True)),
+        vol_scaling_enabled=bool(config.get("vol_scaling_enabled", True)),
     )
 
     positions: list[PositionTarget] = []
