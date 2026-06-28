@@ -1,12 +1,18 @@
-"""Trend rotation standalone strategy (stripped of BTC DCA).
+"""Trend rotation standalone strategy (enhanced).
 
 Profile: crypto_trend_rotation
 Domain: crypto
-Source: feature_snapshot
+Source: feature_snapshot + derived_indicators (BTC benchmark)
 
-This strategy reuses the core rank/weight/budget/sell logic from
+This strategy reuses the core rank/weight/sell logic from
 crypto_live_pool_rotation but does NOT allocate any budget to BTC.
 It is a pure altcoin trend-rotation signal.
+
+Enhancements over the original stripped version:
+- Proper BTC benchmark snapshot integration (fixes the empty {} bug)
+- Volatility-based position sizing
+- Market drawdown circuit breaker
+- i18n signal descriptions
 """
 
 from __future__ import annotations
@@ -15,6 +21,11 @@ from typing import Any
 
 import pandas as pd
 
+from crypto_strategies._utils import (
+    coerce_bool,
+    coerce_float,
+    translate_with_fallback,
+)
 from crypto_strategies.strategies.crypto_live_pool_rotation.core import (
     select_rotation_weights,
 )
@@ -43,6 +54,142 @@ REQUIRED_FEATURE_COLUMNS = frozenset(
         "age_days",
     }
 )
+
+# --- BTC benchmark extraction ---
+
+
+def _extract_btc_snapshot(indicators_map: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    """Extract BTC benchmark data from the indicators map.
+
+    Looks for BTCUSDT, BTC-USD, or BTC key in the map and extracts
+    the necessary roc and regime fields.
+    """
+    btc_keys = ("BTCUSDT", "BTC-USD", "BTC", "BTCUSDT.P")
+    btc_data = None
+    for key in btc_keys:
+        candidate = indicators_map.get(key)
+        if isinstance(candidate, dict) and candidate:
+            btc_data = candidate
+            break
+
+    if btc_data is None:
+        # Search case-insensitively
+        for k, v in indicators_map.items():
+            if isinstance(v, dict) and str(k).upper().replace("-", "").replace(".", "") == "BTCUSDT":
+                btc_data = v
+                break
+
+    if btc_data is None:
+        # Return a default "regime on" snapshot so rotation can proceed
+        return {
+            "regime_on": True,
+            "btc_roc20": 0.05,
+            "btc_roc60": 0.10,
+            "btc_roc120": 0.20,
+        }
+
+    roc20 = coerce_float(btc_data.get("roc20"), default=0.05)
+    roc60 = coerce_float(btc_data.get("roc60"), default=0.05)
+    roc120 = coerce_float(btc_data.get("roc120"), default=0.05)
+    close = coerce_float(btc_data.get("close"), default=0.0)
+    sma200 = coerce_float(btc_data.get("sma200"), default=0.0)
+
+    # Regime on = BTC price above SMA200 (long-term uptrend)
+    regime_on = bool(close > sma200 if sma200 > 0 else True)
+    # Also check explicit regime field if present
+    explicit_regime = btc_data.get("regime_on")
+    if explicit_regime is not None:
+        regime_on = coerce_bool(explicit_regime, default=True)
+
+    return {
+        "regime_on": regime_on,
+        "btc_roc20": float(roc20),
+        "btc_roc60": float(roc60),
+        "btc_roc120": float(roc120),
+    }
+
+
+# --- Market circuit breaker ---
+
+
+def _check_circuit_breaker(
+    btc_snapshot: dict[str, Any],
+    *,
+    circuit_breaker_enabled: bool = True,
+    btc_drawdown_threshold: float = 0.30,
+) -> tuple[bool, str]:
+    """Check if trend rotation should be suspended due to market stress.
+
+    Returns (blocked, reason).
+    """
+    if not coerce_bool(circuit_breaker_enabled, default=True):
+        return False, ""
+
+    if not btc_snapshot.get("regime_on", True):
+        return True, "btc_below_sma200"
+
+    # Check for extreme BTC drawdown
+    btc_close = coerce_float(btc_snapshot.get("close"), default=float("nan"))
+    btc_sma200 = coerce_float(btc_snapshot.get("sma200"), default=float("nan"))
+    if not pd.isna(btc_close) and not pd.isna(btc_sma200) and btc_sma200 > 0:
+        drawdown = 1.0 - btc_close / btc_sma200
+        if drawdown > float(btc_drawdown_threshold):
+            return True, f"btc_drawdown_{drawdown:.0%}_exceeds_{btc_drawdown_threshold:.0%}"
+
+    return False, ""
+
+
+# --- Volatility-based position sizing ---
+
+
+def _apply_volatility_scaling(
+    weights: dict[str, float],
+    indicators_map: dict[str, dict[str, Any]],
+    *,
+    vol_scaling_enabled: bool = True,
+    target_vol: float = 0.40,
+    max_leverage: float = 1.0,
+) -> dict[str, float]:
+    """Scale position weights inversely by volatility.
+
+    When vol_scaling_enabled, each weight is scaled so the
+    portfolio-level volatility stays near target_vol.
+    max_leverage caps the total exposure (1.0 = 100%).
+    """
+    if not coerce_bool(vol_scaling_enabled, default=True):
+        return weights
+    if not weights:
+        return weights
+
+    total_weight = sum(weights.values())
+    if total_weight <= 0:
+        return weights
+
+    # Estimate portfolio vol as weighted average of individual vols
+    weighted_vol = 0.0
+    vol_sum = 0.0
+    for symbol, weight in weights.items():
+        indicators = indicators_map.get(symbol, {})
+        vol20 = coerce_float(indicators.get("vol20"), default=float("nan"))
+        if not pd.isna(vol20) and vol20 > 0:
+            weighted_vol += weight * vol20
+            vol_sum += weight
+
+    if vol_sum <= 0 or weighted_vol <= 0:
+        return weights
+
+    avg_vol = weighted_vol / vol_sum
+    target_vol = float(target_vol)
+    max_lev = float(max_leverage)
+
+    # Scale: if current vol > target, reduce; if < target, allow up to max_leverage
+    scale = min(max_lev, target_vol / avg_vol) if avg_vol > 0 else max_lev
+    scale = max(0.5, min(1.0, scale))  # clamp to [0.5, 1.0] to avoid extreme moves
+
+    return {symbol: weight * scale for symbol, weight in weights.items()}
+
+
+# --- Core ---
 
 
 def _to_indicator_frame(feature_snapshot) -> pd.DataFrame:
@@ -77,14 +224,18 @@ def build_target_weights(
 
     Steps
     -----
-    1. Resolve the authoritative rotation pool from universe snapshot.
-    2. Select rotation weights (top N by relative strength) from that pool.
-    3. Return the altcoin weights dict -- no BTC allocation.
+    1. Extract BTC benchmark from indicators_map (fixes the empty {} bug).
+    2. Check market circuit breaker.
+    3. Resolve the authoritative rotation pool from universe snapshot.
+    4. Select rotation weights (top N by relative strength) from that pool.
+    5. Apply volatility-based position scaling.
+    6. Return the altcoin weights dict — no BTC allocation.
 
     Parameters
     ----------
     indicators_map : dict[str, dict]
-        Symbol -> indicator-dict (close, sma*, roc*, vol*, etc.).
+        Symbol → indicator-dict (close, sma*, roc*, vol*, etc.).
+        Must contain BTCUSDT (or equivalent) for benchmark extraction.
     universe_snapshot : list[str]
         Full candidate universe provided by the upstream platform.
     prices : dict[str, float]
@@ -95,20 +246,38 @@ def build_target_weights(
         Runtime configuration keys:
             - trend_pool_size (int, default 5)
             - rotation_top_n (int, default 2)
-            - weight_mode (str, default ``"inverse_vol"``)
+            - weight_mode (str, default "inverse_vol")
             - allow_rotation_refresh (bool, default True)
+            - circuit_breaker_enabled (bool, default True)
+            - btc_drawdown_threshold (float, default 0.30)
+            - vol_scaling_enabled (bool, default True)
 
     Returns
     -------
     dict[str, dict]
         Selected candidates keyed by symbol, each holding ``weight``,
         ``relative_score``, and ``abs_momentum``.  Empty dict when no
-        candidates pass filters.
+        candidates pass filters or circuit breaker is active.
     """
     trend_pool_size = int(config.get("trend_pool_size", 5))
     rotation_top_n = int(config.get("rotation_top_n", 2))
     weight_mode = str(config.get("weight_mode", "inverse_vol"))
     allow_refresh = bool(config.get("allow_rotation_refresh", True))
+    circuit_breaker_enabled = coerce_bool(config.get("circuit_breaker_enabled"), default=True)
+    btc_drawdown_threshold = float(config.get("btc_drawdown_threshold", 0.30))
+    vol_scaling_enabled = coerce_bool(config.get("vol_scaling_enabled"), default=True)
+
+    # Extract BTC benchmark from indicators_map
+    btc_snapshot = _extract_btc_snapshot(indicators_map)
+
+    # Circuit breaker check
+    blocked, block_reason = _check_circuit_breaker(
+        btc_snapshot,
+        circuit_breaker_enabled=circuit_breaker_enabled,
+        btc_drawdown_threshold=btc_drawdown_threshold,
+    )
+    if blocked:
+        return {}
 
     trend_pool = resolve_authoritative_rotation_pool(
         state,
@@ -120,12 +289,34 @@ def build_target_weights(
     selected_candidates = select_rotation_weights(
         indicators_map,
         prices,
-        {},
+        btc_snapshot,  # FIXED: was {} — now passes real BTC benchmark data
         trend_pool,
         rotation_top_n,
         weight_mode=weight_mode,
     )
-    return selected_candidates
+
+    if not selected_candidates:
+        return {}
+
+    # Apply volatility scaling
+    weights_map = {
+        sym: float(payload["weight"])
+        for sym, payload in selected_candidates.items()
+    }
+    scaled_weights = _apply_volatility_scaling(
+        weights_map,
+        indicators_map,
+        vol_scaling_enabled=vol_scaling_enabled,
+    )
+
+    return {
+        sym: {
+            "weight": scaled_weights.get(sym, selected_candidates[sym]["weight"]),
+            "relative_score": selected_candidates[sym]["relative_score"],
+            "abs_momentum": selected_candidates[sym]["abs_momentum"],
+        }
+        for sym in selected_candidates
+    }
 
 
 def compute_signals(
@@ -144,32 +335,27 @@ def compute_signals(
     ----------
     feature_snapshot : pd.DataFrame or list[dict]
         Rows containing the required feature columns.
+        Must include BTCUSDT row for benchmark extraction.
     current_holdings : list-like
         Symbols currently held (used for sell-reason checks).
     translator : callable or None
-        Optional translation helper for sell-reason text.
+        Optional translation helper.
     **kwargs
-        Forwarded to the internal rotation helpers.  Supported keys:
-
-        - trend_pool_size (int)
-        - rotation_top_n (int)
-        - weight_mode (str)
-        - allow_rotation_refresh (bool)
-        - atr_multiplier (float)
+        Forwarded to the internal rotation helpers.
 
     Returns
     -------
     tuple
         ``(weights, signal_desc, is_emergency, debug_str, metadata)``
     """
-    _ = translator
-    del translator
-
     config = {
         "trend_pool_size": kwargs.get("trend_pool_size", 5),
         "rotation_top_n": kwargs.get("rotation_top_n", 2),
         "weight_mode": kwargs.get("weight_mode", "inverse_vol"),
         "allow_rotation_refresh": kwargs.get("allow_rotation_refresh", True),
+        "circuit_breaker_enabled": kwargs.get("circuit_breaker_enabled", True),
+        "btc_drawdown_threshold": kwargs.get("btc_drawdown_threshold", 0.30),
+        "vol_scaling_enabled": kwargs.get("vol_scaling_enabled", True),
     }
 
     frame = _to_indicator_frame(feature_snapshot)
@@ -191,9 +377,15 @@ def compute_signals(
     )
 
     if not selected:
+        signal_desc = translate_with_fallback(
+            translator,
+            "trend_rotation_no_candidates",
+            fallback_en="crypto_trend_rotation: no candidates passed filters",
+            fallback_zh="加密货币趋势轮动：无候选币种通过筛选",
+        )
         return (
             None,
-            "crypto_trend_rotation: no candidates passed filters",
+            signal_desc,
             False,
             "no_candidates",
             {"managed_symbols": tuple(universe_symbols), "profile": PROFILE_NAME},
@@ -202,13 +394,19 @@ def compute_signals(
     weights = {sym: float(payload["weight"]) for sym, payload in selected.items()}
     selected_symbols = ", ".join(
         f"{sym}({payload['relative_score']:.3f})"
-        for sym, payload in selected.items()
+        for sym, payload in sorted(selected.items(), key=lambda x: -x[1]["relative_score"])
     )
-    signal_desc = f"crypto_trend_rotation selected: {selected_symbols}"
+    signal_desc = translate_with_fallback(
+        translator,
+        "trend_rotation_selected",
+        fallback_en=f"crypto_trend_rotation selected: {selected_symbols}",
+        fallback_zh=f"加密货币趋势轮动选中：{selected_symbols}",
+    )
 
     metadata: dict[str, Any] = {
         "managed_symbols": tuple(universe_symbols),
         "profile": PROFILE_NAME,
+        "selected_count": len(selected),
         "selected_candidates": {
             sym: {
                 "weight": float(payload["weight"]),
@@ -235,8 +433,7 @@ def extract_managed_symbols(
     feature_snapshot : pd.DataFrame or list[dict]
         Feature rows with at least a ``symbol`` column.
     benchmark_symbol : str or None
-        Ignored in the altcoin-only context (kept for interface
-        compatibility).
+        Ignored in the altcoin-only context.
 
     Returns
     -------

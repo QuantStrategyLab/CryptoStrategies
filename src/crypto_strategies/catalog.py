@@ -71,6 +71,51 @@ CRYPTO_LIVE_POOL_ROTATION_DEFAULT_CONFIG = {
 }
 
 CRYPTO_BTC_DCA_DEFAULT_CONFIG = {
+    "base_investment_usd": 100.0,
+    "max_investment_usd": None,
+    "cash_reserve_usd": 0.0,
+    "min_investment_usd": 5.0,
+    "smart_multiplier_enabled": True,
+    "cycle_indicator_enabled": True,
+    "cadence": "monthly",
+    "monthly_day": 25,
+    "monthly_window_calendar_days": 5,
+    "weekly_day": 4,
+    "weekly_window_calendar_days": 4,
+    "quarterly_months": (1, 4, 7, 10),
+    "quarterly_day": 25,
+    "quarterly_window_calendar_days": 5,
+    # Drawdown thresholds
+    "mild_drawdown_threshold": 0.12,
+    "deep_drawdown_threshold": 0.25,
+    "severe_drawdown_threshold": 0.40,
+    "mild_discount_gap": 0.08,
+    "deep_discount_gap": 0.18,
+    "expensive_gap": 0.30,
+    "very_expensive_gap": 0.60,
+    "shallow_drawdown_threshold": 0.05,
+    "overbought_rsi": 75.0,
+    "base_multiplier": 1.0,
+    "mild_pullback_multiplier": 1.50,
+    "deep_pullback_multiplier": 2.25,
+    "severe_pullback_multiplier": 3.0,
+    "expensive_multiplier": 1.0,
+    "very_expensive_multiplier": 1.0,
+    # AHR999 thresholds
+    "ahr999_bottom_threshold": 0.45,
+    "ahr999_accumulation_threshold": 0.80,
+    "ahr999_dca_threshold": 1.20,
+    "ahr999_bottom_multiplier": 3.0,
+    "ahr999_accumulation_multiplier": 2.25,
+    "ahr999_dca_multiplier": 1.50,
+    "ahr999_expensive_multiplier": 0.0,
+    # Z-score exit
+    "zscore_exit_enabled": True,
+    "zscore_exit_parking_symbol": "USDT",
+    "zscore_exit_risk_reduced_exposure": 0.50,
+    "zscore_exit_risk_off_exposure": 0.25,
+    "zscore_exit_allow_outside_execution_window": True,
+    # Legacy params (kept for backward compat)
     "target_ratio_min": 0.0,
     "target_ratio_max": 0.65,
     "ratio_base": 0.14,
@@ -87,12 +132,20 @@ CRYPTO_TREND_ROTATION_DEFAULT_CONFIG = {
     "weight_mode": "inverse_vol",
     "allow_rotation_refresh": True,
     "atr_multiplier": 2.5,
+    "circuit_breaker_enabled": True,
+    "btc_drawdown_threshold": 0.30,
+    "vol_scaling_enabled": True,
+    "target_vol": 0.40,
+    "max_leverage": 1.0,
 }
 
 CRYPTO_EQUITY_COMBO_DEFAULT_CONFIG = {
     "btc_weight": 0.30,
     "trend_weight": 0.70,
     "dynamic_mode": True,
+    "circuit_breaker_enabled": True,
+    "btc_drawdown_threshold": 0.30,
+    "vol_scaling_enabled": True,
 }
 
 STRATEGY_DEFINITIONS: dict[str, StrategyDefinition] = {
@@ -191,7 +244,7 @@ STRATEGY_METADATA: dict[str, StrategyMetadata] = {
         display_name="Crypto BTC DCA",
         description="Dynamic BTC DCA strategy that targets a single BTCUSDT position with equity-scaled allocation.",
         aliases=(),
-        cadence="daily",
+        cadence="daily_check_monthly_execution",
         asset_scope="btc_only",
         benchmark="BTC",
         role="crypto_core_accumulation",

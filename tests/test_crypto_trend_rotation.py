@@ -85,14 +85,18 @@ class CryptoTrendRotationModuleTest(unittest.TestCase):
             current_holdings=[],
         )
 
-        # The rotation pool requires btc_snapshot data via select_rotation_weights,
-        # which is called with {} in the standalone trend module. As a result,
-        # candidates are None (no regime_on signal). Verify the fallback metadata.
-        self.assertIsNone(weights)
+        # After enhancement: _extract_btc_snapshot provides default BTC benchmark
+        # data (regime_on=True) when no BTCUSDT row is present, so rotation now
+        # finds valid candidates from the test data. Both altcoins have:
+        #   price > sma20, price > sma60, price > sma200,
+        #   positive rel_20/60/120, positive abs_momentum => valid candidates.
+        self.assertIsNotNone(weights)
+        self.assertTrue(len(weights) > 0)
         self.assertFalse(is_emergency)
-        self.assertEqual(debug_str, "no_candidates")
+        self.assertEqual(debug_str, "ok")
         self.assertEqual(metadata["profile"], PROFILE_NAME)
         self.assertIn("managed_symbols", metadata)
+        self.assertIn("selected_candidates", metadata)
 
     def test_compute_signals_empty_snapshot(self) -> None:
         """An empty feature snapshot should return None weights."""
