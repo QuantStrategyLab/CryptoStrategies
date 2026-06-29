@@ -1,3 +1,6 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
+
+# egg-info build artifact
+src/crypto_strategies.egg-info/
