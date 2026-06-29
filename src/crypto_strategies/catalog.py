@@ -231,6 +231,7 @@ STRATEGY_METADATA: dict[str, StrategyMetadata] = {
     CRYPTO_LIVE_POOL_ROTATION_PROFILE: StrategyMetadata(
         canonical_profile=CRYPTO_LIVE_POOL_ROTATION_PROFILE,
         display_name="Crypto Live Pool Rotation",
+        localized_display_names={"zh": "加密实时池轮动"},
         description="Trend-following crypto rotation with staged entries, degradation controls, and cash parking.",
         aliases=CRYPTO_LIVE_POOL_ROTATION_ALIASES,
         cadence="daily",
@@ -242,6 +243,7 @@ STRATEGY_METADATA: dict[str, StrategyMetadata] = {
     CRYPTO_BTC_DCA_PROFILE: StrategyMetadata(
         canonical_profile=CRYPTO_BTC_DCA_PROFILE,
         display_name="Crypto BTC DCA",
+        localized_display_names={"zh": "BTC定投"},
         description="Dynamic BTC DCA strategy that targets a single BTCUSDT position with equity-scaled allocation.",
         aliases=(),
         cadence="daily_check_monthly_execution",
@@ -253,6 +255,7 @@ STRATEGY_METADATA: dict[str, StrategyMetadata] = {
     CRYPTO_TREND_ROTATION_PROFILE: StrategyMetadata(
         canonical_profile=CRYPTO_TREND_ROTATION_PROFILE,
         display_name="Crypto Trend Rotation",
+        localized_display_names={"zh": "山寨趋势轮动"},
         description="Pure altcoin trend-following rotation with no BTC allocation.",
         aliases=(),
         cadence="daily",
@@ -264,6 +267,7 @@ STRATEGY_METADATA: dict[str, StrategyMetadata] = {
     CRYPTO_EQUITY_COMBO_PROFILE: StrategyMetadata(
         canonical_profile=CRYPTO_EQUITY_COMBO_PROFILE,
         display_name="Crypto Equity Combo",
+        localized_display_names={"zh": "加密动量组合"},
         description="Combined BTC DCA and trend rotation strategy with dynamic regime-based allocation.",
         aliases=(),
         cadence="daily",
