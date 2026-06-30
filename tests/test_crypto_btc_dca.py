@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import math
 import unittest
-from unittest.mock import MagicMock
 
-import pandas as pd
 
 from crypto_strategies.strategies.crypto_btc_dca import (
     PROFILE_NAME,
