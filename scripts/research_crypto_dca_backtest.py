@@ -22,7 +22,6 @@ from __future__ import annotations
 import argparse
 import math
 import sys
-from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -520,7 +519,7 @@ def print_report(
     print(f"  Smart multipliers: bottom={AHR999_BOTTOM_MULT}x accum={AHR999_ACCUMULATION_MULT}x "
           f"dca={AHR999_DCA_MULT}x severe={SEVERE_MULT}x")
     print()
-    print(f"  Note: CAGR/TotalRet computed from first non-zero equity (first DCA buy).")
+    print("  Note: CAGR/TotalRet computed from first non-zero equity (first DCA buy).")
     print()
 
     # Full period summary
