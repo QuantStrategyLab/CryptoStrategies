@@ -19,7 +19,6 @@ package-dir = {"" = "src"}
 where = ["src"]
 
 [tool.ruff]
-extend = "https://raw.githubusercontent.com/QuantStrategyLab/QuantPlatformKit/main/ruff-shared.toml"
 ignore = ["E701", "E702", "E741", "F841", "F821", "B008", "F401", "F601", "E402"]
 target-version = "py311"
 
