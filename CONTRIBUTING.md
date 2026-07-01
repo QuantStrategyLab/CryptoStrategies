@@ -28,5 +28,10 @@ Thanks for contributing to `CryptoStrategies`.
 Run the main verification command before opening a pull request:
 
 ```bash
-python3 -m pip install -e . && python3 -m unittest discover -s tests -v
+python3 -m pip install -e . numpy pandas pytest pytest-cov ruff build \
+  && python3 -m pip install --no-deps -e ../QuantPlatformKit \
+  && python3 -m pip check \
+  && ruff check . \
+  && python3 -m pytest -q tests --cov --cov-report=term --cov-report=xml \
+  && python3 -m build
 ```
