@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+import tomllib
 from pathlib import Path
 
 from crypto_strategies import (
@@ -23,9 +24,10 @@ from quant_platform_kit.strategy_contracts import resolve_strategy_artifact_cont
 
 ALLOWED_TARGET_MODES = frozenset({"weight", "value"})
 PLATFORM_NATIVE_TARGET_MODES = {BINANCE_PLATFORM: "weight"}
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 GOVERNED_SOURCE_ROOTS = (
-    Path(__file__).resolve().parents[1] / "src" / "crypto_strategies" / "strategies",
-    Path(__file__).resolve().parents[1] / "src" / "crypto_strategies" / "entrypoints",
+    PROJECT_ROOT / "src" / "crypto_strategies" / "strategies",
+    PROJECT_ROOT / "src" / "crypto_strategies" / "entrypoints",
 )
 BANNED_SOURCE_SNIPPETS = (
     "os.getenv(",
@@ -33,6 +35,8 @@ BANNED_SOURCE_SNIPPETS = (
     "binance",
     "BINANCE_",
 )
+QPK_HEALTH_COMMIT = "6d3675914eb5d3fe072d3212a90dfb55fe1c1df4"
+QPK_OLD_HEALTHLESS_COMMIT = "86f03fb8e83c0d372f4e1c64cccf3e6da50b8dd4"
 
 
 class ContractGovernanceTests(unittest.TestCase):
@@ -126,6 +130,18 @@ class ContractGovernanceTests(unittest.TestCase):
                 for snippet in BANNED_SOURCE_SNIPPETS:
                     with self.subTest(path=str(path.relative_to(root.parent.parent)), snippet=snippet):
                         self.assertNotIn(snippet.lower(), text)
+
+    def test_qpk_dependency_includes_shared_health_module_release(self) -> None:
+        pyproject = tomllib.loads((PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+        dependencies = pyproject["project"]["dependencies"]
+        qpk_dependencies = [dep for dep in dependencies if dep.startswith("quant-platform-kit @ ")]
+        expected_dependency = (
+            "quant-platform-kit @ "
+            f"git+https://github.com/QuantStrategyLab/QuantPlatformKit.git@{QPK_HEALTH_COMMIT}"
+        )
+
+        self.assertEqual(qpk_dependencies, [expected_dependency])
+        self.assertNotIn(QPK_OLD_HEALTHLESS_COMMIT, qpk_dependencies[0])
 
 
 if __name__ == "__main__":
