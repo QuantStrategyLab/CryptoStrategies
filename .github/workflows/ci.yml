@@ -43,8 +43,13 @@ jobs:
         run: |
           set -euo pipefail
           python -m pip install --upgrade pip
-          python -m pip install -e . numpy pandas pytest pytest-cov ruff
+          python -m pip install -e . numpy pandas pytest pytest-cov ruff build
           python -m pip install --no-deps -e external/QuantPlatformKit
+
+      - name: Verify dependencies
+        run: |
+          set -euo pipefail
+          python -m pip check
 
       - name: Run Ruff
         run: |
@@ -55,3 +60,8 @@ jobs:
         run: |
           set -euo pipefail
           python -m pytest -q tests --cov --cov-report=term --cov-report=xml
+
+      - name: Build package
+        run: |
+          set -euo pipefail
+          python -m build
