@@ -37,6 +37,26 @@ DEFAULT_BTC_WEIGHT = 0.30
 DEFAULT_TREND_WEIGHT = 0.70
 DYNAMIC_REGIME_OFF_CUT = 0.50
 
+TREND_ONLY_KWARGS = frozenset({
+    "trend_pool_size",
+    "rotation_top_n",
+    "weight_mode",
+    "allow_rotation_refresh",
+    "circuit_breaker_enabled",
+    "btc_drawdown_threshold",
+    "vol_scaling_enabled",
+    "target_vol",
+    "max_leverage",
+})
+
+
+def _clamp_ratio(value: float, *, default: float = 1.0) -> float:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return float(default)
+    return min(1.0, max(0.0, numeric))
+
 
 def _compute_btc_leg(
     total_equity: float,
@@ -47,7 +67,7 @@ def _compute_btc_leg(
     derived_indicators: dict[str, Any] | None = None,
     translator=None,
     **kwargs: Any,
-) -> dict[str, float]:
+) -> tuple[dict[str, float], dict[str, object]]:
     """Compute BTC leg target using the enhanced smart DCA strategy.
 
     Delegates to ``crypto_btc_dca.compute_signals`` to incorporate
@@ -59,35 +79,46 @@ def _compute_btc_leg(
         get_dynamic_btc_target_ratio,
     )
 
-    smart_ratio: float | None = None
+    base_ratio = get_dynamic_btc_target_ratio(total_equity)
+    smart_ratio = base_ratio
+    dca_metadata: dict[str, Any] = {}
+    zscore_target_exposure = 1.0
     try:
+        btc_kwargs = {k: v for k, v in kwargs.items() if k not in TREND_ONLY_KWARGS}
         result = compute_signals(
             prices=prices or {},
             portfolio=portfolio,
             total_equity=total_equity,
             derived_indicators=derived_indicators,
             translator=translator,
-            **kwargs,
+            **btc_kwargs,
         )
-        metadata = result.get("metadata", {}) if isinstance(result, dict) else {}
-        regime = str(metadata.get("regime", ""))
-        # Use smart multiplier only when the strategy is in an accumulation regime
+        dca_metadata = result.get("metadata", {}) if isinstance(result, dict) else {}
+        regime = str(dca_metadata.get("regime", ""))
+        # Use accumulation multipliers to scale the DCA leg, but do not let
+        # valuation-skip regimes force a full target-weight sell in combo mode.
         if regime and regime not in ("ordinary_dca", "ahr999_expensive"):
-            multiplier = float(metadata.get("multiplier", 1.0))
-            base_ratio = get_dynamic_btc_target_ratio(total_equity)
-            # Scale ratio by multiplier, clamped to [base_ratio, base_ratio * 3]
+            multiplier = float(dca_metadata.get("multiplier", 1.0))
             smart_ratio = min(base_ratio * max(1.0, multiplier), base_ratio * 3.0)
             smart_ratio = min(0.65, max(0.0, smart_ratio))
+
+        zscore_exit = dca_metadata.get("zscore_exit")
+        if isinstance(zscore_exit, dict) and zscore_exit.get("applied"):
+            zscore_target_exposure = _clamp_ratio(
+                zscore_exit.get("target_btc_exposure"),
+                default=1.0,
+            )
+            smart_ratio *= zscore_target_exposure
     except (ValueError, TypeError) as exc:
         logger.debug("btc_dca smart signals unavailable (non-critical): %s", exc)
 
-    if smart_ratio is None:
-        from crypto_strategies.strategies.crypto_btc_dca import (
-            get_dynamic_btc_target_ratio,
-        )
-        smart_ratio = get_dynamic_btc_target_ratio(total_equity)
-
-    return {"BTCUSDT": smart_ratio * float(btc_weight)}
+    target_weight = smart_ratio * float(btc_weight)
+    return {"BTCUSDT": target_weight}, {
+        "base_ratio": base_ratio,
+        "smart_ratio": smart_ratio,
+        "zscore_target_exposure": zscore_target_exposure,
+        "dca_metadata": dca_metadata,
+    }
 
 
 def _compute_trend_leg(
@@ -100,6 +131,11 @@ def _compute_trend_leg(
     rotation_top_n: int = 2,
     weight_mode: str = "inverse_vol",
     vol_scaling_enabled: bool = True,
+    allow_rotation_refresh: bool = True,
+    circuit_breaker_enabled: bool = True,
+    btc_drawdown_threshold: float = 0.30,
+    target_vol: float = 0.40,
+    max_leverage: float = 1.0,
 ) -> dict[str, float]:
     """Compute trend leg targets using rotation logic."""
     from crypto_strategies.strategies.crypto_live_pool_rotation.core import (
@@ -110,7 +146,11 @@ def _compute_trend_leg(
     )
 
     btc_snapshot = _extract_btc_snapshot(indicators_map)
-    blocked, _ = _check_circuit_breaker(btc_snapshot)
+    blocked, _ = _check_circuit_breaker(
+        btc_snapshot,
+        circuit_breaker_enabled=circuit_breaker_enabled,
+        btc_drawdown_threshold=btc_drawdown_threshold,
+    )
     if blocked:
         return {}
 
@@ -118,7 +158,7 @@ def _compute_trend_leg(
         state,
         trend_universe_symbols=list(universe_snapshot),
         trend_pool_size=trend_pool_size,
-        allow_refresh=True,
+        allow_refresh=allow_rotation_refresh,
     )
 
     candidates = select_rotation_weights(
@@ -135,6 +175,8 @@ def _compute_trend_leg(
     return _apply_volatility_scaling(
         raw_weights, indicators_map,
         vol_scaling_enabled=vol_scaling_enabled,
+        target_vol=target_vol,
+        max_leverage=max_leverage,
     )
 
 
@@ -191,7 +233,7 @@ def build_target_weights(
         effective_trend = trend_weight
 
     # Compute legs
-    btc_weights = _compute_btc_leg(
+    btc_weights, btc_leg_metadata = _compute_btc_leg(
         total_equity, effective_btc,
         prices=prices, portfolio=portfolio,
         derived_indicators=indicators_map,
@@ -205,7 +247,13 @@ def build_target_weights(
             indicators_map, prices, universe_symbols, state, effective_trend,
             trend_pool_size=int(kwargs.get("trend_pool_size", 5)),
             rotation_top_n=int(kwargs.get("rotation_top_n", 2)),
+            weight_mode=str(kwargs.get("weight_mode", "inverse_vol")),
             vol_scaling_enabled=bool(kwargs.get("vol_scaling_enabled", True)),
+            allow_rotation_refresh=bool(kwargs.get("allow_rotation_refresh", True)),
+            circuit_breaker_enabled=bool(kwargs.get("circuit_breaker_enabled", True)),
+            btc_drawdown_threshold=float(kwargs.get("btc_drawdown_threshold", 0.30)),
+            target_vol=float(kwargs.get("target_vol", 0.40)),
+            max_leverage=float(kwargs.get("max_leverage", 1.0)),
         )
     except (ValueError, TypeError, KeyError) as exc:
         logger.warning("trend_leg failed, using empty weights: %s", exc)
@@ -227,7 +275,7 @@ def build_target_weights(
             "base_btc_weight": btc_weight,
             "base_trend_weight": trend_weight,
         },
-        "btc_leg": {"weights": btc_weights},
+        "btc_leg": {"weights": btc_weights, **btc_leg_metadata},
         "trend_leg": {"weights": trend_weights},
         "regime_off": regime_off,
         "dynamic_mode": dynamic_mode,

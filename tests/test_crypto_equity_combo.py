@@ -9,6 +9,7 @@ from crypto_strategies.strategies.crypto_equity_combo import (
     DEFAULT_TREND_WEIGHT,
     PROFILE_NAME,
     SIGNAL_SOURCE,
+    build_target_weights,
     compute_signals,
     extract_managed_symbols,
 )
@@ -33,6 +34,96 @@ class CryptoEquityComboModuleTest(unittest.TestCase):
         """extract_managed_symbols returns BTCUSDT for the combo."""
         symbols = extract_managed_symbols()
         self.assertEqual(symbols, ("BTCUSDT",))
+
+
+    def test_zscore_exit_reduces_final_btc_leg_target(self) -> None:
+        """Z-Score exit should reduce the combo BTC target, not stay in metadata only."""
+        base_weights, _ = build_target_weights(
+            prices={"BTCUSDT": 60000.0},
+            indicators_map={},
+            universe_snapshot=[],
+            benchmark_snapshot={"regime_on": True},
+            portfolio={"total_equity": 100000.0, "buying_power": 1000.0},
+            btc_weight=1.0,
+            trend_weight=0.0,
+            smart_multiplier_enabled=False,
+            as_of="2026-05-26",
+        )
+        reduced_weights, _ = build_target_weights(
+            prices={"BTCUSDT": 60000.0},
+            indicators_map={},
+            universe_snapshot=[],
+            benchmark_snapshot={"regime_on": True},
+            portfolio={"total_equity": 100000.0, "buying_power": 1000.0},
+            btc_weight=1.0,
+            trend_weight=0.0,
+            smart_multiplier_enabled=False,
+            as_of="2026-05-26",
+            zscore_exit_context={
+                "plugin": "btc_zscore_exit",
+                "canonical_route": "risk_reduced",
+                "position_control": {
+                    "final_route": "risk_reduced",
+                    "target_allocations": {"BTCUSDT": 0.50, "USDT": 0.50},
+                },
+            },
+        )
+
+        self.assertGreater(base_weights["BTCUSDT"], 0.0)
+        self.assertAlmostEqual(reduced_weights["BTCUSDT"], base_weights["BTCUSDT"] * 0.50)
+
+    def test_trend_leg_honors_rotation_refresh_lock(self) -> None:
+        """Combo trend leg should pass allow_rotation_refresh into pool resolution."""
+        indicators_map = {
+            "BTCUSDT": {
+                "close": 100000.0,
+                "sma200": 80000.0,
+                "regime_on": True,
+                "roc20": 0.05,
+                "roc60": 0.10,
+                "roc120": 0.20,
+            },
+            "ETHUSDT": {
+                "close": 3000.0,
+                "sma20": 2800.0,
+                "sma60": 2600.0,
+                "sma200": 2200.0,
+                "roc20": 0.20,
+                "roc60": 0.35,
+                "roc120": 0.60,
+                "vol20": 0.25,
+            },
+            "SOLUSDT": {
+                "close": 180.0,
+                "sma20": 170.0,
+                "sma60": 160.0,
+                "sma200": 120.0,
+                "roc20": 0.48,
+                "roc60": 0.65,
+                "roc120": 0.95,
+                "vol20": 0.30,
+            },
+        }
+
+        weights, metadata = build_target_weights(
+            prices={"BTCUSDT": 100000.0, "ETHUSDT": 3000.0, "SOLUSDT": 180.0},
+            indicators_map=indicators_map,
+            universe_snapshot=["ETHUSDT", "SOLUSDT"],
+            benchmark_snapshot={"regime_on": True},
+            portfolio={"total_equity": 100000.0, "buying_power": 1000.0},
+            state={"rotation_pool_symbols": ["ETHUSDT"]},
+            btc_weight=0.0,
+            trend_weight=1.0,
+            dynamic_mode=False,
+            allow_rotation_refresh=False,
+            rotation_top_n=1,
+            weight_mode="equal",
+            vol_scaling_enabled=False,
+        )
+
+        positive_weights = {symbol for symbol, weight in weights.items() if weight > 0.0}
+        self.assertEqual(positive_weights, {"ETHUSDT"})
+        self.assertEqual(set(metadata["trend_leg"]["weights"]), {"ETHUSDT"})
 
     def test_compute_signals_returns_tuple(self) -> None:
         """compute_signals should return a 5-tuple with weights, signal_desc, cash_residual, status_desc, metadata."""

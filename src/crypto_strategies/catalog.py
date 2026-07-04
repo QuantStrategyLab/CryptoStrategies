@@ -143,10 +143,18 @@ CRYPTO_EQUITY_COMBO_DEFAULT_CONFIG = {
     "btc_weight": 0.30,
     "trend_weight": 0.70,
     "dynamic_mode": True,
+    "smart_multiplier_enabled": True,
+    "cycle_indicator_enabled": True,
+    "zscore_exit_enabled": True,
+    "zscore_exit_parking_symbol": "USDT",
+    "zscore_exit_risk_reduced_exposure": 0.50,
+    "zscore_exit_risk_off_exposure": 0.25,
+    "zscore_exit_allow_outside_execution_window": True,
     "circuit_breaker_enabled": True,
     "btc_drawdown_threshold": 0.30,
     "vol_scaling_enabled": True,
 }
+
 
 STRATEGY_DEFINITIONS: dict[str, StrategyDefinition] = {
     CRYPTO_LIVE_POOL_ROTATION_PROFILE: StrategyDefinition(

@@ -459,8 +459,23 @@ def evaluate_crypto_equity_combo(ctx: StrategyContext) -> StrategyDecision:
         smart_multiplier_enabled=bool(config.get("smart_multiplier_enabled", True)),
         cycle_indicator_enabled=bool(config.get("cycle_indicator_enabled", True)),
         zscore_exit_enabled=bool(config.get("zscore_exit_enabled", True)),
+        zscore_exit_parking_symbol=str(config.get("zscore_exit_parking_symbol", "USDT")),
+        zscore_exit_risk_reduced_exposure=float(
+            config.get("zscore_exit_risk_reduced_exposure", 0.50)
+        ),
+        zscore_exit_risk_off_exposure=float(config.get("zscore_exit_risk_off_exposure", 0.25)),
+        zscore_exit_allow_outside_execution_window=bool(
+            config.get("zscore_exit_allow_outside_execution_window", True)
+        ),
+        trend_pool_size=int(config.get("trend_pool_size", 5)),
+        rotation_top_n=int(config.get("rotation_top_n", 2)),
+        weight_mode=str(config.get("weight_mode", "inverse_vol")),
+        allow_rotation_refresh=bool(config.get("allow_rotation_refresh", True)),
         circuit_breaker_enabled=bool(config.get("circuit_breaker_enabled", True)),
+        btc_drawdown_threshold=float(config.get("btc_drawdown_threshold", 0.30)),
         vol_scaling_enabled=bool(config.get("vol_scaling_enabled", True)),
+        target_vol=float(config.get("target_vol", 0.40)),
+        max_leverage=float(config.get("max_leverage", 1.0)),
     )
 
     positions: list[PositionTarget] = []

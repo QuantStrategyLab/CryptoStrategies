@@ -940,7 +940,11 @@ def compute_signals(
             base_investment_usd=base_amount,
             derived_indicators=derived_indicators,
             translator=translator,
-            **{k: v for k, v in kwargs.items() if k not in ("as_of",)},
+            **{
+                k: v
+                for k, v in kwargs.items()
+                if k not in {"as_of", "smart_multiplier_enabled", "base_investment_usd"}
+            },
         )
     except (ValueError, TypeError) as exc:
         logger.warning("btc_dca build_rebalance_plan failed, falling back: %s", exc)
