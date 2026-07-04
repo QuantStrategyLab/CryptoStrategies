@@ -437,13 +437,17 @@ crypto_trend_rotation_entrypoint = CallableStrategyEntrypoint(
 def evaluate_crypto_equity_combo(ctx: StrategyContext) -> StrategyDecision:
     from crypto_strategies.strategies.crypto_equity_combo import compute_signals
 
+    legacy_core, legacy_rotation = _load_legacy_modules()
     config = _merge_runtime_config(ctx, crypto_equity_combo_manifest.default_config)
     prices = _require_market_data(ctx, "market_prices")
     indicators_map = _require_market_data(ctx, "derived_indicators")
     benchmark_snapshot = _require_market_data(ctx, "benchmark_snapshot")
     portfolio = _resolve_portfolio_snapshot(ctx)
+    account_metrics = _resolve_account_metrics(ctx)
     universe_snapshot = list(_require_market_data(ctx, "universe_snapshot"))
+    state = dict(ctx.state)
     translator = _resolve_translator(config)
+    get_symbol_trade_state_fn, set_symbol_trade_state_fn = _resolve_state_helpers(config)
 
     weights, signal_desc, has_cash_residual, status_desc, metadata = compute_signals(
         prices=prices,
@@ -451,7 +455,7 @@ def evaluate_crypto_equity_combo(ctx: StrategyContext) -> StrategyDecision:
         universe_snapshot=universe_snapshot,
         benchmark_snapshot=benchmark_snapshot,
         portfolio=portfolio,
-        state=dict(ctx.state),
+        state=state,
         translator=translator,
         btc_weight=float(config.get("btc_weight", 0.30)),
         trend_weight=float(config.get("trend_weight", 0.70)),
@@ -489,11 +493,69 @@ def evaluate_crypto_equity_combo(ctx: StrategyContext) -> StrategyDecision:
                 )
             )
 
+    btc_target_ratio = float(weights.get("BTCUSDT", 0.0))
+    trend_target_ratio = float(sum(weight for symbol, weight in weights.items() if symbol != "BTCUSDT"))
+    total_equity = float(account_metrics["total_equity"])
+    cash_usdt = max(0.0, float(account_metrics["cash_usdt"]))
+    trend_value = max(0.0, float(account_metrics.get("trend_value", 0.0)))
+    dca_value = max(0.0, float(account_metrics.get("dca_value", 0.0)))
+    trend_usdt_pool = max(0.0, min(cash_usdt, (total_equity * trend_target_ratio) - trend_value))
+    remaining_cash = max(0.0, cash_usdt - trend_usdt_pool)
+    dca_usdt_pool = max(0.0, min(remaining_cash, (total_equity * btc_target_ratio) - dca_value))
+    btc_base_order_usdt = float(legacy_core.get_dynamic_btc_base_order(total_equity))
+    trend_metadata = metadata.get("trend_leg", {}) if isinstance(metadata.get("trend_leg"), Mapping) else {}
+    selected_candidates = {
+        str(symbol): {
+            "weight": float(payload.get("weight", 0.0)),
+            "relative_score": float(payload.get("relative_score", 0.0)),
+            "abs_momentum": float(payload.get("abs_momentum", 0.0)),
+        }
+        for symbol, payload in dict(trend_metadata.get("rotation_candidates", {})).items()
+    }
+    runtime_trend_universe = {symbol: {"base_asset": symbol[:-4]} for symbol in universe_snapshot}
+    sell_reasons: dict[str, str] = {}
+    atr_multiplier = float(config.get("atr_multiplier", 2.5))
+    for symbol in universe_snapshot:
+        curr_price = prices.get(symbol)
+        if curr_price is None:
+            continue
+        reason = legacy_rotation.get_trend_sell_reason(
+            state,
+            symbol,
+            curr_price,
+            indicators_map.get(symbol),
+            selected_candidates,
+            atr_multiplier,
+            get_symbol_trade_state_fn=get_symbol_trade_state_fn,
+            set_symbol_trade_state_fn=set_symbol_trade_state_fn,
+            translate_fn=translator,
+        )
+        if reason:
+            sell_reasons[symbol] = str(reason)
+
+    eligible_buy_symbols, planned_trend_buys = legacy_rotation.plan_trend_buys(
+        state,
+        runtime_trend_universe=runtime_trend_universe,
+        selected_candidates=selected_candidates,
+        trend_indicators=indicators_map,
+        prices=prices,
+        available_trend_buy_budget=trend_usdt_pool,
+        allow_new_trend_entries=bool(config.get("allow_new_trend_entries", True)),
+        get_symbol_trade_state_fn=get_symbol_trade_state_fn,
+        allocate_trend_buy_budget_fn=legacy_core.allocate_trend_buy_budget,
+    )
+
     budget_intents = (
         BudgetIntent(
-            name="combo_pool",
-            amount=0.0,
-            purpose="combined_allocation",
+            name="btc_core_dca_pool",
+            symbol="BTCUSDT",
+            amount=dca_usdt_pool,
+            purpose="btc_core_accumulation",
+        ),
+        BudgetIntent(
+            name="trend_rotation_pool",
+            amount=trend_usdt_pool,
+            purpose="trend_rotation",
         ),
     )
 
@@ -502,6 +564,8 @@ def evaluate_crypto_equity_combo(ctx: StrategyContext) -> StrategyDecision:
         risk_flags += ("regime_off",)
     if has_cash_residual:
         risk_flags += ("cash_residual",)
+    if not selected_candidates:
+        risk_flags += ("no_trend_candidates",)
     if not weights:
         risk_flags += ("no_positions",)
 
@@ -511,6 +575,24 @@ def evaluate_crypto_equity_combo(ctx: StrategyContext) -> StrategyDecision:
         "metadata": metadata,
         "managed_symbols": metadata.get("managed_symbols", ()),
         "profile": metadata.get("profile"),
+        "trend_pool": tuple(trend_metadata.get("trend_pool", ())),
+        "rotation_candidates": selected_candidates,
+        "ranking_preview": tuple(trend_metadata.get("ranking_preview", ())),
+        "rotation_pool_source_version": trend_metadata.get("rotation_pool_source_version"),
+        "rotation_pool_source_as_of_date": trend_metadata.get("rotation_pool_source_as_of_date"),
+        "rotation_pool_last_month": trend_metadata.get("rotation_pool_last_month"),
+        "sell_reasons": sell_reasons,
+        "eligible_buy_symbols": tuple(eligible_buy_symbols),
+        "planned_trend_buys": {symbol: float(amount) for symbol, amount in planned_trend_buys.items()},
+        "btc_base_order_usdt": btc_base_order_usdt,
+        "btc_target_ratio": btc_target_ratio,
+        "trend_target_ratio": trend_target_ratio,
+        "artifact_contract": {
+            "version": config.get("artifact_contract_version"),
+            "max_age_days": config.get("artifact_max_age_days"),
+            "acceptable_modes": tuple(config.get("artifact_acceptable_modes", ())),
+            **dict(ctx.artifacts.get("trend_pool_contract", {})),
+        },
     }
 
     return StrategyDecision(
