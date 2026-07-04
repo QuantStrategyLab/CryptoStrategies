@@ -460,6 +460,7 @@ def evaluate_crypto_equity_combo(ctx: StrategyContext) -> StrategyDecision:
         btc_weight=float(config.get("btc_weight", 0.30)),
         trend_weight=float(config.get("trend_weight", 0.70)),
         dynamic_mode=bool(config.get("dynamic_mode", True)),
+        dynamic_regime_off_cut=float(config.get("dynamic_regime_off_cut", 0.50)),
         smart_multiplier_enabled=bool(config.get("smart_multiplier_enabled", True)),
         cycle_indicator_enabled=bool(config.get("cycle_indicator_enabled", True)),
         zscore_exit_enabled=bool(config.get("zscore_exit_enabled", True)),

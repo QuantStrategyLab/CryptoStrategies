@@ -208,6 +208,7 @@ def build_target_weights(
     btc_weight: float = DEFAULT_BTC_WEIGHT,
     trend_weight: float = DEFAULT_TREND_WEIGHT,
     dynamic_mode: bool = True,
+    dynamic_regime_off_cut: float = DYNAMIC_REGIME_OFF_CUT,
     translator=None,
     **kwargs: Any,
 ) -> tuple[dict[str, float], dict[str, object]]:
@@ -243,9 +244,11 @@ def build_target_weights(
         regime_off = not btc_snapshot.get("regime_on", True)
 
     if dynamic_mode and regime_off:
-        effective_btc = btc_weight + trend_weight * DYNAMIC_REGIME_OFF_CUT
-        effective_trend = trend_weight * (1.0 - DYNAMIC_REGIME_OFF_CUT)
+        regime_off_cut = _clamp_ratio(dynamic_regime_off_cut, default=DYNAMIC_REGIME_OFF_CUT)
+        effective_btc = btc_weight + trend_weight * regime_off_cut
+        effective_trend = trend_weight * (1.0 - regime_off_cut)
     else:
+        regime_off_cut = 0.0
         effective_btc = btc_weight
         effective_trend = trend_weight
 
@@ -292,6 +295,7 @@ def build_target_weights(
             "trend_weight": effective_trend,
             "base_btc_weight": btc_weight,
             "base_trend_weight": trend_weight,
+            "dynamic_regime_off_cut": regime_off_cut,
         },
         "btc_leg": {"weights": btc_weights, **btc_leg_metadata},
         "trend_leg": {"weights": trend_weights, **trend_metadata},

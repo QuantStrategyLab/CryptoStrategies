@@ -143,6 +143,7 @@ CRYPTO_EQUITY_COMBO_DEFAULT_CONFIG = {
     "btc_weight": 0.30,
     "trend_weight": 0.70,
     "dynamic_mode": True,
+    "dynamic_regime_off_cut": 0.50,
     "smart_multiplier_enabled": True,
     "cycle_indicator_enabled": True,
     "zscore_exit_enabled": True,
