@@ -125,6 +125,37 @@ class CryptoEquityComboModuleTest(unittest.TestCase):
         self.assertEqual(positive_weights, {"ETHUSDT"})
         self.assertEqual(set(metadata["trend_leg"]["weights"]), {"ETHUSDT"})
 
+    def test_dynamic_regime_off_cut_is_configurable(self) -> None:
+        """Regime-off cut should be configurable while keeping the 50% default."""
+        _, default_metadata = build_target_weights(
+            prices={"BTCUSDT": 60000.0},
+            indicators_map={},
+            universe_snapshot=[],
+            benchmark_snapshot={"regime_on": False},
+            portfolio={"total_equity": 100000.0, "buying_power": 1000.0},
+            btc_weight=0.30,
+            trend_weight=0.70,
+            smart_multiplier_enabled=False,
+        )
+        _, custom_metadata = build_target_weights(
+            prices={"BTCUSDT": 60000.0},
+            indicators_map={},
+            universe_snapshot=[],
+            benchmark_snapshot={"regime_on": False},
+            portfolio={"total_equity": 100000.0, "buying_power": 1000.0},
+            btc_weight=0.30,
+            trend_weight=0.70,
+            dynamic_regime_off_cut=0.30,
+            smart_multiplier_enabled=False,
+        )
+
+        self.assertAlmostEqual(default_metadata["combo"]["btc_weight"], 0.65)
+        self.assertAlmostEqual(default_metadata["combo"]["trend_weight"], 0.35)
+        self.assertAlmostEqual(default_metadata["combo"]["dynamic_regime_off_cut"], 0.50)
+        self.assertAlmostEqual(custom_metadata["combo"]["btc_weight"], 0.51)
+        self.assertAlmostEqual(custom_metadata["combo"]["trend_weight"], 0.49)
+        self.assertAlmostEqual(custom_metadata["combo"]["dynamic_regime_off_cut"], 0.30)
+
     def test_compute_signals_returns_tuple(self) -> None:
         """compute_signals should return a 5-tuple with weights, signal_desc, cash_residual, status_desc, metadata."""
         prices = {"BTCUSDT": 60000.0}
