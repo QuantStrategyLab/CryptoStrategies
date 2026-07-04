@@ -136,7 +136,7 @@ def _compute_trend_leg(
     btc_drawdown_threshold: float = 0.30,
     target_vol: float = 0.40,
     max_leverage: float = 1.0,
-) -> dict[str, float]:
+) -> tuple[dict[str, float], dict[str, object]]:
     """Compute trend leg targets using rotation logic."""
     from crypto_strategies.strategies.crypto_live_pool_rotation.core import (
         select_rotation_weights,
@@ -152,7 +152,7 @@ def _compute_trend_leg(
         btc_drawdown_threshold=btc_drawdown_threshold,
     )
     if blocked:
-        return {}
+        return {}, {"trend_pool": (), "rotation_candidates": {}, "circuit_blocked": True}
 
     trend_pool = resolve_authoritative_rotation_pool(
         state,
@@ -165,19 +165,36 @@ def _compute_trend_leg(
         indicators_map, prices, btc_snapshot, trend_pool,
         rotation_top_n, weight_mode=weight_mode,
     )
+    trend_metadata: dict[str, object] = {
+        "trend_pool": tuple(trend_pool),
+        "rotation_candidates": {
+            symbol: {
+                "weight": float(payload.get("weight", 0.0)),
+                "relative_score": float(payload.get("relative_score", 0.0)),
+                "abs_momentum": float(payload.get("abs_momentum", 0.0)),
+            }
+            for symbol, payload in candidates.items()
+        },
+        "ranking_preview": tuple(trend_pool[: int(trend_pool_size)]),
+        "rotation_pool_source_version": state.get("rotation_pool_source_version"),
+        "rotation_pool_source_as_of_date": state.get("rotation_pool_source_as_of_date"),
+        "rotation_pool_last_month": state.get("rotation_pool_last_month"),
+        "circuit_blocked": False,
+    }
     if not candidates:
-        return {}
+        return {}, trend_metadata
 
     raw_weights = {
         sym: float(payload["weight"]) * float(trend_weight)
         for sym, payload in candidates.items()
     }
-    return _apply_volatility_scaling(
+    weights = _apply_volatility_scaling(
         raw_weights, indicators_map,
         vol_scaling_enabled=vol_scaling_enabled,
         target_vol=target_vol,
         max_leverage=max_leverage,
     )
+    return weights, trend_metadata
 
 
 def build_target_weights(
@@ -243,7 +260,7 @@ def build_target_weights(
 
     trend_weights: dict[str, float] = {}
     try:
-        trend_weights = _compute_trend_leg(
+        trend_weights, trend_metadata = _compute_trend_leg(
             indicators_map, prices, universe_symbols, state, effective_trend,
             trend_pool_size=int(kwargs.get("trend_pool_size", 5)),
             rotation_top_n=int(kwargs.get("rotation_top_n", 2)),
@@ -257,6 +274,7 @@ def build_target_weights(
         )
     except (ValueError, TypeError, KeyError) as exc:
         logger.warning("trend_leg failed, using empty weights: %s", exc)
+        trend_metadata = {"trend_pool": (), "rotation_candidates": {}, "error": str(exc)}
 
     # Combine
     all_symbols = set(btc_weights) | set(trend_weights)
@@ -276,7 +294,7 @@ def build_target_weights(
             "base_trend_weight": trend_weight,
         },
         "btc_leg": {"weights": btc_weights, **btc_leg_metadata},
-        "trend_leg": {"weights": trend_weights},
+        "trend_leg": {"weights": trend_weights, **trend_metadata},
         "regime_off": regime_off,
         "dynamic_mode": dynamic_mode,
         "gross_exposure": sum(combined.values()),

@@ -278,6 +278,80 @@ class CryptoStrategyEntrypointTests(unittest.TestCase):
             legacy_core.get_dynamic_btc_base_order(account_metrics["total_equity"]),
         )
 
+    def test_crypto_equity_combo_entrypoint_exposes_binance_execution_contract(self) -> None:
+        try:
+            entrypoint = get_strategy_entrypoint("crypto_equity_combo")
+        except ModuleNotFoundError as exc:
+            if exc.name == "pandas":
+                self.skipTest("pandas is not installed")
+            raise
+
+        decision = entrypoint.evaluate(
+            StrategyContext(
+                as_of="2026-04-06",
+                market_data={
+                    "market_prices": {"BTCUSDT": 60000.0, "ETHUSDT": 3000.0, "SOLUSDT": 180.0},
+                    "derived_indicators": {
+                        "BTCUSDT": {
+                            "close": 60000.0,
+                            "sma200": 50000.0,
+                            "roc20": 0.08,
+                            "roc60": 0.16,
+                            "roc120": 0.30,
+                            "regime_on": True,
+                        },
+                        "ETHUSDT": {
+                            "close": 3000.0,
+                            "sma20": 2800.0,
+                            "sma60": 2600.0,
+                            "sma200": 2200.0,
+                            "roc20": 0.20,
+                            "roc60": 0.35,
+                            "roc120": 0.60,
+                            "vol20": 0.25,
+                        },
+                        "SOLUSDT": {
+                            "close": 180.0,
+                            "sma20": 170.0,
+                            "sma60": 160.0,
+                            "sma200": 120.0,
+                            "roc20": 0.28,
+                            "roc60": 0.45,
+                            "roc120": 0.75,
+                            "vol20": 0.30,
+                        },
+                    },
+                    "benchmark_snapshot": {"regime_on": True},
+                    "portfolio_snapshot": PortfolioSnapshot(
+                        as_of="2026-04-06",
+                        total_equity=1000.0,
+                        buying_power=1000.0,
+                        cash_balance=1000.0,
+                        metadata={
+                            "account_metrics": {
+                                "total_equity": 1000.0,
+                                "cash_usdt": 1000.0,
+                                "trend_value": 0.0,
+                                "dca_value": 0.0,
+                            },
+                        },
+                    ),
+                    "universe_snapshot": ("ETHUSDT", "SOLUSDT"),
+                },
+                state={},
+            )
+        )
+
+        budget_map = {budget.name: budget.amount for budget in decision.budgets}
+        self.assertGreater(budget_map["trend_rotation_pool"], 0.0)
+        self.assertGreater(budget_map["btc_core_dca_pool"], 0.0)
+        self.assertGreater(decision.diagnostics["btc_base_order_usdt"], 0.0)
+        self.assertGreater(decision.diagnostics["btc_target_ratio"], 0.0)
+        self.assertGreater(decision.diagnostics["trend_target_ratio"], 0.0)
+        self.assertEqual(set(decision.diagnostics["rotation_candidates"]), {"ETHUSDT", "SOLUSDT"})
+        self.assertEqual(set(decision.diagnostics["eligible_buy_symbols"]), {"ETHUSDT", "SOLUSDT"})
+        self.assertEqual(set(decision.diagnostics["planned_trend_buys"]), {"ETHUSDT", "SOLUSDT"})
+
     def test_crypto_live_pool_rotation_entrypoint_sets_regime_off_flag_when_btc_regime_is_off(self) -> None:
         try:
             entrypoint = get_strategy_entrypoint("crypto_live_pool_rotation")
