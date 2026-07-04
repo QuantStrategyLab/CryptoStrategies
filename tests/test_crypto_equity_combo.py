@@ -156,6 +156,81 @@ class CryptoEquityComboModuleTest(unittest.TestCase):
         self.assertAlmostEqual(custom_metadata["combo"]["trend_weight"], 0.49)
         self.assertAlmostEqual(custom_metadata["combo"]["dynamic_regime_off_cut"], 0.30)
 
+    def test_dual_leg_regime_hard_caps_btc_and_trend_to_cash(self) -> None:
+        """Opt-in dual-leg mode should allow hard risk-off to leave residual cash."""
+        _, metadata = build_target_weights(
+            prices={"BTCUSDT": 94000.0},
+            indicators_map={},
+            universe_snapshot=[],
+            benchmark_snapshot={
+                "regime_on": False,
+                "ma200": 100000.0,
+                "ma200_slope": -0.02,
+            },
+            portfolio={"total_equity": 100000.0, "buying_power": 1000.0},
+            btc_weight=0.30,
+            trend_weight=0.70,
+            dynamic_regime_mode="dual_leg",
+            dynamic_hard_btc_weight=0.25,
+            dynamic_hard_trend_weight=0.0,
+            smart_multiplier_enabled=False,
+        )
+
+        combo = metadata["combo"]
+        self.assertAlmostEqual(combo["btc_weight"], 0.25)
+        self.assertAlmostEqual(combo["trend_weight"], 0.0)
+        self.assertEqual(combo["dynamic_regime_mode"], "dual_leg")
+        self.assertEqual(combo["regime_tier"], "hard")
+        self.assertAlmostEqual(metadata["btc_sma200_ratio"], 0.94)
+
+    def test_dual_leg_regime_soft_uses_neutral_cash_cap(self) -> None:
+        """Opt-in dual-leg mode should support a soft/neutral tier."""
+        _, metadata = build_target_weights(
+            prices={"BTCUSDT": 102000.0},
+            indicators_map={},
+            universe_snapshot=[],
+            benchmark_snapshot={
+                "regime_on": False,
+                "ma200": 100000.0,
+                "ma200_slope": -0.005,
+            },
+            portfolio={"total_equity": 100000.0, "buying_power": 1000.0},
+            btc_weight=0.30,
+            trend_weight=0.70,
+            dynamic_regime_mode="dual_leg",
+            dynamic_soft_btc_weight=0.45,
+            dynamic_soft_trend_weight=0.15,
+            smart_multiplier_enabled=False,
+        )
+
+        combo = metadata["combo"]
+        self.assertAlmostEqual(combo["btc_weight"], 0.45)
+        self.assertAlmostEqual(combo["trend_weight"], 0.15)
+        self.assertEqual(combo["regime_tier"], "soft")
+
+    def test_dual_leg_regime_keeps_base_weights_when_risk_on(self) -> None:
+        """Opt-in dual-leg mode should not alter base weights in risk-on conditions."""
+        _, metadata = build_target_weights(
+            prices={"BTCUSDT": 110000.0},
+            indicators_map={},
+            universe_snapshot=[],
+            benchmark_snapshot={
+                "regime_on": True,
+                "ma200": 100000.0,
+                "ma200_slope": 0.02,
+            },
+            portfolio={"total_equity": 100000.0, "buying_power": 1000.0},
+            btc_weight=0.30,
+            trend_weight=0.70,
+            dynamic_regime_mode="dual_leg",
+            smart_multiplier_enabled=False,
+        )
+
+        combo = metadata["combo"]
+        self.assertAlmostEqual(combo["btc_weight"], 0.30)
+        self.assertAlmostEqual(combo["trend_weight"], 0.70)
+        self.assertEqual(combo["regime_tier"], "risk_on")
+
     def test_compute_signals_returns_tuple(self) -> None:
         """compute_signals should return a 5-tuple with weights, signal_desc, cash_residual, status_desc, metadata."""
         prices = {"BTCUSDT": 60000.0}
