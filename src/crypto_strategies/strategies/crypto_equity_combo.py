@@ -6,8 +6,10 @@ smart sizing (AHR999, drawdown multipliers, Z-score exit) is active when
 configured.
 
 Static mode: fixed weights per leg (default: 30/70 BTC/trend).
-Dynamic mode: regime-based adjustment — when BTC is below SMA200, reduce
-trend leg by 50 % and re-allocate to BTC.
+Dynamic legacy mode: regime-based adjustment — when BTC is below SMA200,
+reduce trend leg by 50 % and re-allocate to BTC.
+Dynamic dual-leg mode: opt-in tiered regime adjustment that can cap both BTC
+and trend legs, leaving the residual in cash.
 
 Usage
 -----
@@ -36,6 +38,8 @@ PROFILE_NAME = "crypto_equity_combo"
 DEFAULT_BTC_WEIGHT = 0.30
 DEFAULT_TREND_WEIGHT = 0.70
 DYNAMIC_REGIME_OFF_CUT = 0.50
+DYNAMIC_REGIME_MODE_LEGACY = "legacy"
+DYNAMIC_REGIME_MODE_DUAL_LEG = "dual_leg"
 
 TREND_ONLY_KWARGS = frozenset({
     "trend_pool_size",
@@ -56,6 +60,137 @@ def _clamp_ratio(value: float, *, default: float = 1.0) -> float:
     except (TypeError, ValueError):
         return float(default)
     return min(1.0, max(0.0, numeric))
+
+
+def _normalized_regime_mode(value: object) -> str:
+    mode = str(value or DYNAMIC_REGIME_MODE_LEGACY).strip().lower().replace("-", "_")
+    if mode in {"dual", "dual_leg", "tiered", "cash_cap"}:
+        return DYNAMIC_REGIME_MODE_DUAL_LEG
+    return DYNAMIC_REGIME_MODE_LEGACY
+
+
+def _first_finite(payload: dict[str, Any] | None, *keys: str) -> float | None:
+    if not isinstance(payload, dict):
+        return None
+    for key in keys:
+        value = payload.get(key)
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            continue
+        if numeric == numeric:
+            return numeric
+    return None
+
+
+def _btc_sma200_ratio(
+    prices: dict[str, float],
+    benchmark_snapshot: dict[str, Any] | None,
+    indicators_map: dict[str, Any] | None,
+) -> float | None:
+    gap = _first_finite(
+        benchmark_snapshot,
+        "sma200_gap",
+        "gap_vs_sma200",
+        "price_vs_sma200",
+    )
+    if gap is not None:
+        return 1.0 + gap
+
+    ratio = _first_finite(
+        benchmark_snapshot,
+        "price_sma200_ratio",
+        "sma200_ratio",
+        "mayer_multiple",
+    )
+    if ratio is not None:
+        return ratio
+
+    ma200 = _first_finite(benchmark_snapshot, "ma200", "sma200", "sma_200")
+    if ma200 is None and isinstance(indicators_map, dict):
+        btc_indicators = indicators_map.get("BTCUSDT")
+        ma200 = _first_finite(btc_indicators, "ma200", "sma200", "sma_200")
+
+    price = _first_finite(benchmark_snapshot, "close", "price")
+    if price is None:
+        price = _first_finite(prices, "BTCUSDT", "BTC")
+
+    if price is None or ma200 is None or ma200 <= 0.0:
+        return None
+    return price / ma200
+
+
+def _resolve_dynamic_weights(
+    prices: dict[str, float],
+    indicators_map: dict[str, Any] | None,
+    benchmark_snapshot: dict[str, Any] | None,
+    *,
+    btc_weight: float,
+    trend_weight: float,
+    dynamic_mode: bool,
+    dynamic_regime_mode: str,
+    dynamic_regime_off_cut: float,
+    dynamic_hard_sma200_ratio: float,
+    dynamic_hard_ma200_slope: float,
+    dynamic_soft_sma200_ratio: float,
+    dynamic_hard_btc_weight: float,
+    dynamic_hard_trend_weight: float,
+    dynamic_soft_btc_weight: float,
+    dynamic_soft_trend_weight: float,
+) -> tuple[float, float, dict[str, object]]:
+    ratio = _btc_sma200_ratio(prices, benchmark_snapshot, indicators_map)
+    ma200_slope = _first_finite(benchmark_snapshot, "ma200_slope", "sma200_slope")
+
+    regime_off = False
+    if isinstance(benchmark_snapshot, dict):
+        regime_on = benchmark_snapshot.get("regime_on")
+        if regime_on is not None:
+            regime_off = not bool(regime_on)
+        elif ratio is not None:
+            regime_off = ratio <= 1.0
+    else:
+        btc_snapshot = _extract_btc_snapshot(indicators_map or {})
+        regime_off = not btc_snapshot.get("regime_on", True)
+
+    mode = _normalized_regime_mode(dynamic_regime_mode)
+    regime_tier = "risk_on"
+    regime_off_cut = 0.0
+    effective_btc = btc_weight
+    effective_trend = trend_weight
+
+    if dynamic_mode and mode == DYNAMIC_REGIME_MODE_DUAL_LEG:
+        hard = regime_off and (
+            (ratio is None and ma200_slope is None)
+            or (ratio is not None and ratio < dynamic_hard_sma200_ratio)
+            or (ma200_slope is not None and ma200_slope < dynamic_hard_ma200_slope)
+        )
+        soft = (
+            regime_off
+            or (ratio is not None and ratio < dynamic_soft_sma200_ratio)
+            or (ma200_slope is not None and ma200_slope < 0.0)
+        )
+        if hard:
+            regime_tier = "hard"
+            effective_btc = _clamp_ratio(dynamic_hard_btc_weight, default=btc_weight)
+            effective_trend = _clamp_ratio(dynamic_hard_trend_weight, default=0.0)
+        elif soft:
+            regime_tier = "soft"
+            effective_btc = _clamp_ratio(dynamic_soft_btc_weight, default=btc_weight)
+            effective_trend = _clamp_ratio(dynamic_soft_trend_weight, default=trend_weight)
+    elif dynamic_mode and regime_off:
+        regime_tier = "legacy_regime_off"
+        regime_off_cut = _clamp_ratio(dynamic_regime_off_cut, default=DYNAMIC_REGIME_OFF_CUT)
+        effective_btc = btc_weight + trend_weight * regime_off_cut
+        effective_trend = trend_weight * (1.0 - regime_off_cut)
+
+    return effective_btc, effective_trend, {
+        "regime_off": regime_off,
+        "regime_mode": mode,
+        "regime_tier": regime_tier,
+        "dynamic_regime_off_cut": regime_off_cut,
+        "btc_sma200_ratio": ratio,
+        "ma200_slope": ma200_slope,
+    }
 
 
 def _compute_btc_leg(
@@ -208,7 +343,15 @@ def build_target_weights(
     btc_weight: float = DEFAULT_BTC_WEIGHT,
     trend_weight: float = DEFAULT_TREND_WEIGHT,
     dynamic_mode: bool = True,
+    dynamic_regime_mode: str = DYNAMIC_REGIME_MODE_LEGACY,
     dynamic_regime_off_cut: float = DYNAMIC_REGIME_OFF_CUT,
+    dynamic_hard_sma200_ratio: float = 0.97,
+    dynamic_hard_ma200_slope: float = -0.015,
+    dynamic_soft_sma200_ratio: float = 1.05,
+    dynamic_hard_btc_weight: float = 0.30,
+    dynamic_hard_trend_weight: float = 0.0,
+    dynamic_soft_btc_weight: float = 0.45,
+    dynamic_soft_trend_weight: float = 0.15,
     translator=None,
     **kwargs: Any,
 ) -> tuple[dict[str, float], dict[str, object]]:
@@ -233,24 +376,23 @@ def build_target_weights(
 
     state = state or {}
 
-    # Dynamic regime adjustment
-    regime_off = False
-    if benchmark_snapshot:
-        regime_on = benchmark_snapshot.get("regime_on")
-        if regime_on is not None:
-            regime_off = not bool(regime_on)
-    else:
-        btc_snapshot = _extract_btc_snapshot(indicators_map or {})
-        regime_off = not btc_snapshot.get("regime_on", True)
-
-    if dynamic_mode and regime_off:
-        regime_off_cut = _clamp_ratio(dynamic_regime_off_cut, default=DYNAMIC_REGIME_OFF_CUT)
-        effective_btc = btc_weight + trend_weight * regime_off_cut
-        effective_trend = trend_weight * (1.0 - regime_off_cut)
-    else:
-        regime_off_cut = 0.0
-        effective_btc = btc_weight
-        effective_trend = trend_weight
+    effective_btc, effective_trend, regime_metadata = _resolve_dynamic_weights(
+        prices,
+        indicators_map,
+        benchmark_snapshot,
+        btc_weight=btc_weight,
+        trend_weight=trend_weight,
+        dynamic_mode=dynamic_mode,
+        dynamic_regime_mode=dynamic_regime_mode,
+        dynamic_regime_off_cut=dynamic_regime_off_cut,
+        dynamic_hard_sma200_ratio=dynamic_hard_sma200_ratio,
+        dynamic_hard_ma200_slope=dynamic_hard_ma200_slope,
+        dynamic_soft_sma200_ratio=dynamic_soft_sma200_ratio,
+        dynamic_hard_btc_weight=dynamic_hard_btc_weight,
+        dynamic_hard_trend_weight=dynamic_hard_trend_weight,
+        dynamic_soft_btc_weight=dynamic_soft_btc_weight,
+        dynamic_soft_trend_weight=dynamic_soft_trend_weight,
+    )
 
     # Compute legs
     btc_weights, btc_leg_metadata = _compute_btc_leg(
@@ -295,11 +437,16 @@ def build_target_weights(
             "trend_weight": effective_trend,
             "base_btc_weight": btc_weight,
             "base_trend_weight": trend_weight,
-            "dynamic_regime_off_cut": regime_off_cut,
+            "dynamic_regime_off_cut": regime_metadata["dynamic_regime_off_cut"],
+            "dynamic_regime_mode": regime_metadata["regime_mode"],
+            "regime_tier": regime_metadata["regime_tier"],
         },
         "btc_leg": {"weights": btc_weights, **btc_leg_metadata},
         "trend_leg": {"weights": trend_weights, **trend_metadata},
-        "regime_off": regime_off,
+        "regime_off": regime_metadata["regime_off"],
+        "regime_tier": regime_metadata["regime_tier"],
+        "btc_sma200_ratio": regime_metadata["btc_sma200_ratio"],
+        "ma200_slope": regime_metadata["ma200_slope"],
         "dynamic_mode": dynamic_mode,
         "gross_exposure": sum(combined.values()),
         "selected_count": len(combined),
