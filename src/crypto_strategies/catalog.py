@@ -267,7 +267,7 @@ STRATEGY_METADATA: dict[str, StrategyMetadata] = {
         asset_scope="btc_only",
         benchmark="BTC",
         role="crypto_core_accumulation",
-        status="runtime_enabled",
+        status="shadow_candidate",
     ),
     CRYPTO_TREND_ROTATION_PROFILE: StrategyMetadata(
         canonical_profile=CRYPTO_TREND_ROTATION_PROFILE,
@@ -279,7 +279,7 @@ STRATEGY_METADATA: dict[str, StrategyMetadata] = {
         asset_scope="liquid_crypto_assets",
         benchmark="BTC",
         role="crypto_offensive_rotation",
-        status="runtime_enabled",
+        status="research_backtest_only",
     ),
     CRYPTO_EQUITY_COMBO_PROFILE: StrategyMetadata(
         canonical_profile=CRYPTO_EQUITY_COMBO_PROFILE,
@@ -291,7 +291,7 @@ STRATEGY_METADATA: dict[str, StrategyMetadata] = {
         asset_scope="crypto_equity",
         benchmark="BTC",
         role="crypto_combined",
-        status="runtime_enabled",
+        status="research_backtest_only",
     ),
 }
 
@@ -309,9 +309,13 @@ def get_runtime_enabled_profiles() -> frozenset[str]:
     """Return the set of strategy profiles allowed to run on this platform.
 
     This defines the rollout allowlist — the upper bound of what profiles
-    may be enabled.  By default all defined profiles are allowed.
+    may be enabled.
     """
-    return frozenset(STRATEGY_DEFINITIONS)
+    return frozenset(
+        profile
+        for profile, metadata in STRATEGY_METADATA.items()
+        if str(metadata.status or "").strip().lower() == "runtime_enabled"
+    )
 
 
 def get_strategy_catalog() -> StrategyCatalog:

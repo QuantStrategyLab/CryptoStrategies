@@ -1,55 +1,21 @@
-import unittest
+from __future__ import annotations
 
-from quant_platform_kit.common.strategies import get_strategy_component_map
-from crypto_strategies import get_strategy_definitions
 from crypto_strategies.catalog import (
-    CRYPTO_CANONICAL_REQUIRED_INPUTS,
-    CRYPTO_LEADER_ROTATION_PROFILE,
+    CRYPTO_BTC_DCA_PROFILE,
+    CRYPTO_EQUITY_COMBO_PROFILE,
     CRYPTO_LIVE_POOL_ROTATION_PROFILE,
-    get_strategy_definition,
+    CRYPTO_TREND_ROTATION_PROFILE,
+    get_runtime_enabled_profiles,
     get_strategy_metadata,
 )
-from crypto_strategies.runtime_adapters import BINANCE_PLATFORM, get_platform_runtime_adapter
 
 
-class CatalogTest(unittest.TestCase):
-    def test_catalog_contains_crypto_live_pool_rotation(self):
-        catalog = get_strategy_definitions()
-        self.assertIn(CRYPTO_LIVE_POOL_ROTATION_PROFILE, catalog)
-        self.assertEqual(catalog[CRYPTO_LIVE_POOL_ROTATION_PROFILE].domain, "crypto")
-        self.assertEqual(catalog[CRYPTO_LIVE_POOL_ROTATION_PROFILE].supported_platforms, frozenset({"binance"}))
-        self.assertEqual(catalog[CRYPTO_LIVE_POOL_ROTATION_PROFILE].target_mode, "weight")
-        self.assertEqual(catalog[CRYPTO_LIVE_POOL_ROTATION_PROFILE].required_inputs, CRYPTO_CANONICAL_REQUIRED_INPUTS)
-
-    def test_known_profile_resolves(self):
-        definition = get_strategy_definition("crypto_live_pool_rotation")
-        self.assertEqual(definition.profile, CRYPTO_LIVE_POOL_ROTATION_PROFILE)
-        component_map = get_strategy_component_map(definition)
-        core_module = component_map["core"]
-        self.assertEqual(
-            core_module.module_path,
-            "crypto_strategies.strategies.crypto_live_pool_rotation.core",
-        )
-        rotation_module = component_map["rotation"]
-        self.assertEqual(
-            rotation_module.module_path,
-            "crypto_strategies.strategies.crypto_live_pool_rotation.rotation",
-        )
-
-    def test_legacy_leader_rotation_profile_resolves_to_live_pool_rotation(self):
-        definition = get_strategy_definition(CRYPTO_LEADER_ROTATION_PROFILE)
-        metadata = get_strategy_metadata(CRYPTO_LEADER_ROTATION_PROFILE)
-
-        self.assertEqual(definition.profile, CRYPTO_LIVE_POOL_ROTATION_PROFILE)
-        self.assertEqual(metadata.canonical_profile, CRYPTO_LIVE_POOL_ROTATION_PROFILE)
-        self.assertIn(CRYPTO_LEADER_ROTATION_PROFILE, metadata.aliases)
-
-    def test_runtime_adapter_covers_canonical_inputs(self):
-        definition = get_strategy_definition(CRYPTO_LIVE_POOL_ROTATION_PROFILE)
-        adapter = get_platform_runtime_adapter(CRYPTO_LIVE_POOL_ROTATION_PROFILE, platform_id=BINANCE_PLATFORM)
-        self.assertLessEqual(definition.required_inputs, adapter.available_inputs)
-        self.assertEqual(adapter.portfolio_input_name, "portfolio_snapshot")
+def test_only_live_pool_rotation_remains_runtime_enabled() -> None:
+    assert get_runtime_enabled_profiles() == frozenset({CRYPTO_LIVE_POOL_ROTATION_PROFILE})
+    assert get_strategy_metadata(CRYPTO_LIVE_POOL_ROTATION_PROFILE).status == "runtime_enabled"
 
 
-if __name__ == "__main__":
-    unittest.main()
+def test_non_live_crypto_profiles_are_not_runtime_enabled() -> None:
+    assert get_strategy_metadata(CRYPTO_BTC_DCA_PROFILE).status == "shadow_candidate"
+    assert get_strategy_metadata(CRYPTO_TREND_ROTATION_PROFILE).status == "research_backtest_only"
+    assert get_strategy_metadata(CRYPTO_EQUITY_COMBO_PROFILE).status == "research_backtest_only"
