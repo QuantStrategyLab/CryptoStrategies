@@ -37,6 +37,12 @@ These profiles depend on artifacts produced by `CryptoLivePoolPipelines` before 
 
 Research-only profiles may stay in code for reproducibility and future review, but they should not appear in current configurable live profiles.
 
+| Profile | Name | Notes |
+| --- | --- | --- |
+| `crypto_btc_dca` | Crypto BTC DCA | Shadow candidate; allowed for monitoring and accumulation review, but still platform gated. |
+| `crypto_trend_rotation` | Crypto Trend Rotation | Research-only redesign candidate. |
+| `crypto_equity_combo` | Crypto Equity Combo | Research-only orchestrator candidate. |
+
 No direct runtime strategies are exposed from this package.
 
 ## How this connects to execution
