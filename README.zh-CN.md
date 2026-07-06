@@ -1,5 +1,14 @@
 # CryptoStrategies
 
+
+## QSL 架构角色
+
+- **层级**：`策略库`。
+- **职责**：加密策略实现包。
+- **事实源/归属**：BinancePlatform 消费的 runtime 策略代码和元数据。
+- **消费对象**：QuantPlatformKit 和 CryptoLivePoolPipelines artifacts。
+- **禁止事项**：持有券商凭据或执行部署。
+
 [English README](README.md)
 
 > 投资有风险。本项目不构成投资建议，仅用于学习、研究和工程审阅。
