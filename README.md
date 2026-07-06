@@ -1,5 +1,14 @@
 # CryptoStrategies
 
+
+## QSL architecture role
+
+- **Layer**: `strategy-library`.
+- **Responsibility**: crypto strategy implementation package.
+- **Owns**: runtime strategy code and metadata consumed by BinancePlatform.
+- **Consumes**: QuantPlatformKit and CryptoLivePoolPipelines artifacts.
+- **Must not**: own broker credentials or execution deployment.
+
 [Chinese README](README.zh-CN.md)
 
 > Investing involves risk. This project does not provide investment advice and is for education, research, and engineering review only.
