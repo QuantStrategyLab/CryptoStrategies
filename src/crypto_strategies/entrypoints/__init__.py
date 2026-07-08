@@ -426,7 +426,7 @@ def evaluate_crypto_trend_rotation(ctx: StrategyContext) -> StrategyDecision:
         risk_flags=risk_flags,
         diagnostics=diagnostics,
     )
-    return apply_risk_gate(decision, max_single_weight=0.50)
+    return apply_risk_gate(decision, max_single_weight=0.30)
 
 
 crypto_trend_rotation_entrypoint = CallableStrategyEntrypoint(
@@ -615,7 +615,7 @@ def evaluate_crypto_equity_combo(ctx: StrategyContext) -> StrategyDecision:
         risk_flags=risk_flags,
         diagnostics=diagnostics,
     )
-    return apply_risk_gate(decision)
+    return apply_risk_gate(decision, max_single_weight=0.30)
 
 
 crypto_equity_combo_entrypoint = CallableStrategyEntrypoint(

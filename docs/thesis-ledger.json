@@ -1,0 +1,28 @@
+{
+  "strategies": {
+    "crypto_live_pool_rotation": {
+      "thesis": "加密实时池轮动可在趋势市捕获相对强度并借助 ATR 止损控制尾部",
+      "falsification_conditions": [
+        "滚动12个月相对 BTC 超额 < 0",
+        "ATR 止损后仍出现 >30% 单笔回撤"
+      ],
+      "created": "2025-09-01",
+      "last_verified": "2026-07-08",
+      "verdict": "active",
+      "hit_rate": null,
+      "status_note": "runtime_enabled"
+    },
+    "crypto_btc_dca": {
+      "thesis": "BTC 智能定投在波动分层下优于固定金额 DCA",
+      "falsification_conditions": [
+        "相对等额定投 12个月超额 < 0",
+        "高波动加仓规则连续失效 3 个月"
+      ],
+      "created": "2025-09-01",
+      "last_verified": "2026-07-08",
+      "verdict": "active",
+      "hit_rate": null,
+      "status_note": "shadow_candidate"
+    }
+  }
+}
