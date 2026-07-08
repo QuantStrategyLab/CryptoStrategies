@@ -18,7 +18,7 @@ from crypto_strategies.manifests import (
     crypto_trend_rotation_manifest,
 )
 
-from ._common import apply_risk_gate
+from ._common import apply_risk_gate, record_strategy_decision
 
 
 """Unified crypto strategy entrypoints built on top of legacy core/rotation modules."""
@@ -261,7 +261,14 @@ def evaluate_crypto_live_pool_rotation(ctx: StrategyContext) -> StrategyDecision
         risk_flags=risk_flags,
         diagnostics=diagnostics,
     )
-    return apply_risk_gate(decision)
+    decision = apply_risk_gate(decision)
+    record_strategy_decision(
+        ctx,
+        decision,
+        profile_id=crypto_live_pool_rotation_manifest.profile,
+        domain=crypto_live_pool_rotation_manifest.domain,
+    )
+    return decision
 
 
 crypto_live_pool_rotation_entrypoint = CallableStrategyEntrypoint(
@@ -343,7 +350,14 @@ def evaluate_crypto_btc_dca(ctx: StrategyContext) -> StrategyDecision:
         risk_flags=risk_flags,
         diagnostics=diagnostics,
     )
-    return apply_risk_gate(decision, max_single_weight=0.50)
+    decision = apply_risk_gate(decision, max_single_weight=0.50)
+    record_strategy_decision(
+        ctx,
+        decision,
+        profile_id=crypto_btc_dca_manifest.profile,
+        domain=crypto_btc_dca_manifest.domain,
+    )
+    return decision
 
 
 crypto_btc_dca_entrypoint = CallableStrategyEntrypoint(
@@ -426,7 +440,14 @@ def evaluate_crypto_trend_rotation(ctx: StrategyContext) -> StrategyDecision:
         risk_flags=risk_flags,
         diagnostics=diagnostics,
     )
-    return apply_risk_gate(decision, max_single_weight=0.30)
+    decision = apply_risk_gate(decision, max_single_weight=0.30)
+    record_strategy_decision(
+        ctx,
+        decision,
+        profile_id=crypto_trend_rotation_manifest.profile,
+        domain=crypto_trend_rotation_manifest.domain,
+    )
+    return decision
 
 
 crypto_trend_rotation_entrypoint = CallableStrategyEntrypoint(
@@ -615,7 +636,14 @@ def evaluate_crypto_equity_combo(ctx: StrategyContext) -> StrategyDecision:
         risk_flags=risk_flags,
         diagnostics=diagnostics,
     )
-    return apply_risk_gate(decision, max_single_weight=0.30)
+    decision = apply_risk_gate(decision, max_single_weight=0.30)
+    record_strategy_decision(
+        ctx,
+        decision,
+        profile_id=crypto_equity_combo_manifest.profile,
+        domain=crypto_equity_combo_manifest.domain,
+    )
+    return decision
 
 
 crypto_equity_combo_entrypoint = CallableStrategyEntrypoint(
