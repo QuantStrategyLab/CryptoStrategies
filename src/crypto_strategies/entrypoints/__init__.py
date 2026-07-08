@@ -18,6 +18,8 @@ from crypto_strategies.manifests import (
     crypto_trend_rotation_manifest,
 )
 
+from ._common import apply_risk_gate
+
 
 """Unified crypto strategy entrypoints built on top of legacy core/rotation modules."""
 
@@ -253,12 +255,13 @@ def evaluate_crypto_live_pool_rotation(ctx: StrategyContext) -> StrategyDecision
             **dict(ctx.artifacts.get("trend_pool_contract", {})),
         },
     }
-    return StrategyDecision(
+    decision = StrategyDecision(
         positions=tuple(positions),
         budgets=budget_intents,
         risk_flags=risk_flags,
         diagnostics=diagnostics,
     )
+    return apply_risk_gate(decision, max_single_weight=0.30)
 
 
 crypto_live_pool_rotation_entrypoint = CallableStrategyEntrypoint(
@@ -334,12 +337,13 @@ def evaluate_crypto_btc_dca(ctx: StrategyContext) -> StrategyDecision:
         "mayer_multiple": metadata.get("mayer_multiple", float("nan")),
     }
 
-    return StrategyDecision(
+    decision = StrategyDecision(
         positions=tuple(positions),
         budgets=budget_intents,
         risk_flags=risk_flags,
         diagnostics=diagnostics,
     )
+    return apply_risk_gate(decision, max_single_weight=0.50)
 
 
 crypto_btc_dca_entrypoint = CallableStrategyEntrypoint(
@@ -416,12 +420,13 @@ def evaluate_crypto_trend_rotation(ctx: StrategyContext) -> StrategyDecision:
         "profile": metadata.get("profile"),
     }
 
-    return StrategyDecision(
+    decision = StrategyDecision(
         positions=tuple(positions),
         budgets=budget_intents,
         risk_flags=risk_flags,
         diagnostics=diagnostics,
     )
+    return apply_risk_gate(decision, max_single_weight=0.30)
 
 
 crypto_trend_rotation_entrypoint = CallableStrategyEntrypoint(
@@ -604,12 +609,13 @@ def evaluate_crypto_equity_combo(ctx: StrategyContext) -> StrategyDecision:
         },
     }
 
-    return StrategyDecision(
+    decision = StrategyDecision(
         positions=tuple(positions),
         budgets=budget_intents,
         risk_flags=risk_flags,
         diagnostics=diagnostics,
     )
+    return apply_risk_gate(decision)
 
 
 crypto_equity_combo_entrypoint = CallableStrategyEntrypoint(
