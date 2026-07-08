@@ -261,7 +261,7 @@ def evaluate_crypto_live_pool_rotation(ctx: StrategyContext) -> StrategyDecision
         risk_flags=risk_flags,
         diagnostics=diagnostics,
     )
-    decision = apply_risk_gate(decision)
+    decision = apply_risk_gate(decision, ctx=ctx)
     record_strategy_decision(
         ctx,
         decision,
@@ -350,7 +350,7 @@ def evaluate_crypto_btc_dca(ctx: StrategyContext) -> StrategyDecision:
         risk_flags=risk_flags,
         diagnostics=diagnostics,
     )
-    decision = apply_risk_gate(decision, max_single_weight=0.50)
+    decision = apply_risk_gate(decision, ctx=ctx, max_single_weight=0.50)
     record_strategy_decision(
         ctx,
         decision,
@@ -440,7 +440,7 @@ def evaluate_crypto_trend_rotation(ctx: StrategyContext) -> StrategyDecision:
         risk_flags=risk_flags,
         diagnostics=diagnostics,
     )
-    decision = apply_risk_gate(decision, max_single_weight=0.30)
+    decision = apply_risk_gate(decision, ctx=ctx, max_single_weight=0.30)
     record_strategy_decision(
         ctx,
         decision,
@@ -636,7 +636,7 @@ def evaluate_crypto_equity_combo(ctx: StrategyContext) -> StrategyDecision:
         risk_flags=risk_flags,
         diagnostics=diagnostics,
     )
-    decision = apply_risk_gate(decision, max_single_weight=0.30)
+    decision = apply_risk_gate(decision, ctx=ctx, max_single_weight=0.30)
     record_strategy_decision(
         ctx,
         decision,
