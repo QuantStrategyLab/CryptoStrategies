@@ -261,7 +261,7 @@ def evaluate_crypto_live_pool_rotation(ctx: StrategyContext) -> StrategyDecision
         risk_flags=risk_flags,
         diagnostics=diagnostics,
     )
-    return apply_risk_gate(decision, max_single_weight=0.30)
+    return apply_risk_gate(decision)
 
 
 crypto_live_pool_rotation_entrypoint = CallableStrategyEntrypoint(
@@ -426,7 +426,7 @@ def evaluate_crypto_trend_rotation(ctx: StrategyContext) -> StrategyDecision:
         risk_flags=risk_flags,
         diagnostics=diagnostics,
     )
-    return apply_risk_gate(decision, max_single_weight=0.30)
+    return apply_risk_gate(decision, max_single_weight=0.50)
 
 
 crypto_trend_rotation_entrypoint = CallableStrategyEntrypoint(
