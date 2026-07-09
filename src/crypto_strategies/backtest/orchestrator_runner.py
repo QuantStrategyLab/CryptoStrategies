@@ -1,14 +1,16 @@
-"""BacktestRunner adapter for crypto live pool rotation."""
+"""BacktestRunner adapter for crypto live pool rotation and equity combo."""
 
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
-from typing import Any, Mapping
+from typing import Any, Mapping, cast
 
 import numpy as np
 import pandas as pd
 
+from crypto_strategies.backtest.combo_simulator import ComboMode, CryptoComboBacktestConfig, run_combo_backtest
 from crypto_strategies.backtest.live_pool_simulator import run_live_pool_rotation_backtest
+from crypto_strategies.strategies.crypto_equity_combo import PROFILE_NAME as CRYPTO_EQUITY_COMBO_PROFILE
 
 try:
     from quant_platform_kit.strategy_lifecycle.contracts import BacktestResult
@@ -18,7 +20,8 @@ except ImportError:  # pragma: no cover
 
 PROFILE_NAME = "crypto_live_pool_rotation"
 DEFAULT_MIN_HISTORY_DAYS = 120
-SUPPORTED_PROFILES = frozenset({PROFILE_NAME})
+COMBO_DEFAULT_MIN_HISTORY_DAYS = 260
+SUPPORTED_PROFILES = frozenset({PROFILE_NAME, CRYPTO_EQUITY_COMBO_PROFILE})
 
 
 def _synthetic_panel(*, days: int = 1500, symbols: tuple[str, ...] = ("BTCUSDT", "ETHUSDT", "SOLUSDT")) -> pd.DataFrame:
@@ -42,6 +45,21 @@ def _synthetic_panel(*, days: int = 1500, symbols: tuple[str, ...] = ("BTCUSDT",
     return panel.sort_index()
 
 
+def _synthetic_market_history(*, days: int = 1500, start: str = "2020-01-01") -> pd.DataFrame:
+    dates = pd.date_range(start, periods=days, freq="D")
+    symbols = ("BTCUSDT", "ETHUSDT")
+    rates = {"BTCUSDT": 1.0012, "ETHUSDT": 1.0015}
+    rows: list[dict[str, object]] = []
+    for symbol in symbols:
+        price = 20000.0 if symbol == "BTCUSDT" else 1500.0
+        rate = rates[symbol]
+        for idx, day in enumerate(dates):
+            price *= rate
+            close = price * (1.0 + 0.03 * ((idx % 13) - 6) / 13)
+            rows.append({"date": day, "symbol": symbol, "close": close})
+    return pd.DataFrame(rows)
+
+
 def _slice_panel(panel: pd.DataFrame, *, start_date: date | None, end_date: date | None) -> pd.DataFrame:
     level_dates = panel.index.get_level_values("date")
     frame = panel
@@ -51,6 +69,23 @@ def _slice_panel(panel: pd.DataFrame, *, start_date: date | None, end_date: date
     if end_date is not None:
         frame = frame.loc[level_dates <= pd.Timestamp(end_date)]
     return frame.sort_index()
+
+
+def _slice_history(
+    market_history: pd.DataFrame,
+    *,
+    start_date: date | None,
+    end_date: date | None,
+    lookback_days: int = 0,
+) -> pd.DataFrame:
+    frame = market_history.copy()
+    frame["date"] = pd.to_datetime(frame["date"], utc=False).dt.tz_localize(None).dt.normalize()
+    if start_date is not None:
+        effective_start = pd.Timestamp(start_date) - pd.Timedelta(days=max(int(lookback_days), 0))
+        frame = frame[frame["date"] >= effective_start]
+    if end_date is not None:
+        frame = frame[frame["date"] <= pd.Timestamp(end_date)]
+    return frame.sort_values(["date", "symbol"]).reset_index(drop=True)
 
 
 def _metrics_to_result(
@@ -78,6 +113,7 @@ def _metrics_to_result(
         cagr=cagr,
         volatility=float(metrics.get("Annualized Volatility") or 0.0),
         win_rate=float(metrics.get("Win Rate") or 0.0),
+        total_return=float(metrics.get("total_return") or 0.0),
         start_date=start_date,
         end_date=end_date,
         observation_count=int(metrics.get("Trading Days") or 0),
@@ -106,6 +142,11 @@ class CryptoLivePoolBacktestRunner:
                 f"Unsupported strategy_profile={strategy_profile!r}; "
                 f"supported={sorted(SUPPORTED_PROFILES)}"
             )
+        if strategy_profile != PROFILE_NAME:
+            raise ValueError(
+                f"Unsupported strategy_profile={strategy_profile!r}; "
+                f"use CryptoEquityComboBacktestRunner for {CRYPTO_EQUITY_COMBO_PROFILE!r}"
+            )
 
         panel = self._panel
         if panel is None:
@@ -132,4 +173,96 @@ class CryptoLivePoolBacktestRunner:
         )
 
 
-__all__ = ["PROFILE_NAME", "SUPPORTED_PROFILES", "CryptoLivePoolBacktestRunner"]
+class CryptoEquityComboBacktestRunner:
+    """Protocol-compatible BacktestRunner for crypto_equity_combo research."""
+
+    def __init__(
+        self,
+        *,
+        market_history: pd.DataFrame | None = None,
+        synthetic_days: int = 1600,
+    ) -> None:
+        self._market_history = market_history
+        self._synthetic_days = int(synthetic_days)
+
+    def run(
+        self,
+        strategy_profile: str,
+        params: Mapping[str, Any],
+        start_date: date | None = None,
+        end_date: date | None = None,
+    ) -> Any:
+        if strategy_profile != CRYPTO_EQUITY_COMBO_PROFILE:
+            raise ValueError(
+                f"Unsupported strategy_profile={strategy_profile!r}; "
+                f"supported={CRYPTO_EQUITY_COMBO_PROFILE!r}"
+            )
+
+        min_history_days = int(params.get("min_history_days", COMBO_DEFAULT_MIN_HISTORY_DAYS))
+        combo_mode = str(params.get("combo_mode", "dynamic"))
+        if combo_mode not in {"static", "dynamic"}:
+            raise ValueError("combo_mode must be 'static' or 'dynamic'")
+
+        history = self._market_history
+        if history is None:
+            history = _synthetic_market_history(
+                days=max(self._synthetic_days, min_history_days + 400),
+            )
+        sliced = _slice_history(
+            history,
+            start_date=start_date,
+            end_date=end_date,
+            lookback_days=min_history_days + 5,
+        )
+        if sliced.empty:
+            raise ValueError("No market history rows for requested window")
+
+        started = datetime.now(timezone.utc)
+        result = run_combo_backtest(
+            sliced,
+            combo_config=CryptoComboBacktestConfig(
+                combo_mode=cast(ComboMode, combo_mode),
+                min_history_days=min_history_days,
+            ),
+        )
+        elapsed = (datetime.now(timezone.utc) - started).total_seconds()
+        eval_frame = sliced
+        if start_date is not None:
+            eval_frame = sliced[sliced["date"] >= pd.Timestamp(start_date)]
+        return _metrics_to_result(
+            strategy_profile=strategy_profile,
+            params=params,
+            metrics=result.metrics,
+            start_date=start_date or (eval_frame["date"].min().date() if not eval_frame.empty else None),
+            end_date=end_date or (eval_frame["date"].max().date() if not eval_frame.empty else None),
+            run_duration_seconds=elapsed,
+        )
+
+
+def build_backtest_runner(
+    strategy_profile: str,
+    *,
+    panel: pd.DataFrame | None = None,
+    market_history: pd.DataFrame | None = None,
+    synthetic_days: int = 1600,
+) -> CryptoLivePoolBacktestRunner | CryptoEquityComboBacktestRunner:
+    if strategy_profile == CRYPTO_EQUITY_COMBO_PROFILE:
+        return CryptoEquityComboBacktestRunner(
+            market_history=market_history,
+            synthetic_days=synthetic_days,
+        )
+    return CryptoLivePoolBacktestRunner(
+        panel=panel,
+        synthetic_days=synthetic_days,
+    )
+
+
+__all__ = [
+    "COMBO_DEFAULT_MIN_HISTORY_DAYS",
+    "DEFAULT_MIN_HISTORY_DAYS",
+    "PROFILE_NAME",
+    "SUPPORTED_PROFILES",
+    "CryptoEquityComboBacktestRunner",
+    "CryptoLivePoolBacktestRunner",
+    "build_backtest_runner",
+]

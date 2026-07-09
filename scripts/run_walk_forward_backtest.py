@@ -10,11 +10,13 @@ from pathlib import Path
 from typing import Any
 
 from crypto_strategies.backtest.orchestrator_runner import (
+    COMBO_DEFAULT_MIN_HISTORY_DAYS,
     DEFAULT_MIN_HISTORY_DAYS,
     PROFILE_NAME,
     SUPPORTED_PROFILES,
-    CryptoLivePoolBacktestRunner,
+    build_backtest_runner,
 )
+from crypto_strategies.strategies.crypto_equity_combo import PROFILE_NAME as CRYPTO_EQUITY_COMBO_PROFILE
 
 DEFAULT_WINDOWS: tuple[tuple[date, date], ...] = (
     (date(2023, 6, 1), date(2024, 5, 31)),
@@ -23,6 +25,10 @@ DEFAULT_WINDOWS: tuple[tuple[date, date], ...] = (
 
 PROFILE_DEFAULTS: dict[str, dict[str, Any]] = {
     PROFILE_NAME: {"min_history_days": DEFAULT_MIN_HISTORY_DAYS, "top_n": 2, "rebalance_every": 7},
+    CRYPTO_EQUITY_COMBO_PROFILE: {
+        "min_history_days": COMBO_DEFAULT_MIN_HISTORY_DAYS,
+        "combo_mode": "dynamic",
+    },
 }
 
 
@@ -45,6 +51,8 @@ def run_walk_forward(
     windows: tuple[tuple[date, date], ...] = DEFAULT_WINDOWS,
     synthetic_days: int = 1600,
     store_root: Path | None = None,
+    panel: Any = None,
+    market_history: Any = None,
 ) -> dict[str, Any]:
     from quant_platform_kit.strategy_lifecycle.backtest_orchestrator import BacktestOrchestrator
     from quant_platform_kit.strategy_lifecycle.performance_store import PerformanceStore
@@ -53,7 +61,12 @@ def run_walk_forward(
         raise ValueError(f"unsupported profile={profile!r}; supported={sorted(SUPPORTED_PROFILES)}")
 
     params = dict(PROFILE_DEFAULTS.get(profile, {"min_history_days": DEFAULT_MIN_HISTORY_DAYS}))
-    runner = CryptoLivePoolBacktestRunner(synthetic_days=synthetic_days)
+    runner = build_backtest_runner(
+        profile,
+        panel=panel,
+        market_history=market_history,
+        synthetic_days=synthetic_days,
+    )
     store = PerformanceStore(local_root=store_root or Path("/tmp/crypto_wf_store"))
     orchestrator = BacktestOrchestrator(store=store)
     orchestrator.register_runner("crypto", runner)

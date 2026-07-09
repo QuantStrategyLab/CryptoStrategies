@@ -207,12 +207,37 @@ def load_crypto_data() -> pd.DataFrame:
 
 def run_backtest(
     prices: pd.DataFrame,
+    *,
+    orchestrator: bool = False,
 ) -> dict[str, dict[str, Any]]:
     """Run the three-strategy backtest.
 
     Returns nested dict keyed by strategy name, each containing an equity
     curve DataFrame and per-period metrics.
     """
+    if orchestrator:
+        from crypto_strategies.backtest.orchestrator_research import run_combo_profile_backtest
+        from crypto_strategies.strategies.crypto_equity_combo import PROFILE_NAME
+
+        rows = []
+        for day in prices.index:
+            rows.append({"date": day, "symbol": "BTCUSDT", "close": float(prices.loc[day, "btc_close"])})
+            rows.append({"date": day, "symbol": "ETHUSDT", "close": float(prices.loc[day, "eth_close"])})
+        market_history = pd.DataFrame(rows)
+        payload = run_combo_profile_backtest(
+            PROFILE_NAME,
+            market_history=market_history,
+            params={"combo_mode": "dynamic"},
+        )
+        return {
+            "orchestrator": {
+                "equity": pd.Series(dtype=float),
+                "metrics": payload["metrics"],
+                "profile": payload["profile"],
+                "source": payload["source"],
+            }
+        }
+
     btc_close = prices["btc_close"].dropna()
     eth_close = prices["eth_close"].dropna()
 
@@ -475,6 +500,11 @@ def main() -> None:
         action="store_true",
         help="Output results as JSON to stdout",
     )
+    parser.add_argument(
+        "--orchestrator",
+        action="store_true",
+        help="Thin path via CryptoEquityComboBacktestRunner (single dynamic combo window).",
+    )
     args = parser.parse_args()
 
     print("Loading crypto price data via yfinance ...", file=sys.stderr)
@@ -485,8 +515,22 @@ def main() -> None:
     )
 
     print("Running backtest simulation ...", file=sys.stderr)
-    results = run_backtest(prices)
+    results = run_backtest(prices, orchestrator=args.orchestrator)
     print("  Done.", file=sys.stderr)
+
+    if args.orchestrator:
+        payload = results["orchestrator"]
+        text = json.dumps(
+            {
+                "profile": payload["profile"],
+                "metrics": payload["metrics"],
+                "source": payload["source"],
+                "orchestrator": True,
+            },
+            indent=2,
+        )
+        print(text)
+        return
 
     if args.json_output:
         # Strip equity curves for JSON output (too large)
