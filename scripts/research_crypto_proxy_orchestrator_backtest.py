@@ -14,11 +14,13 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from crypto_strategies.backtest.orchestrator_runner import (  # noqa: E402
+    COMBO_DEFAULT_MIN_HISTORY_DAYS,
     DEFAULT_MIN_HISTORY_DAYS,
     PROFILE_NAME,
     SUPPORTED_PROFILES,
-    CryptoLivePoolBacktestRunner,
+    build_backtest_runner,
 )
+from crypto_strategies.strategies.crypto_equity_combo import PROFILE_NAME as CRYPTO_EQUITY_COMBO_PROFILE
 from scripts.run_walk_forward_backtest import run_walk_forward  # noqa: E402
 
 
@@ -38,8 +40,11 @@ def main() -> int:
     if args.mode == "walk_forward":
         payload = run_walk_forward(profile=args.profile, synthetic_days=args.synthetic_days)
     else:
-        runner = CryptoLivePoolBacktestRunner(synthetic_days=args.synthetic_days)
-        params = {"min_history_days": DEFAULT_MIN_HISTORY_DAYS, "top_n": 2, "rebalance_every": 7}
+        runner = build_backtest_runner(args.profile, synthetic_days=args.synthetic_days)
+        if args.profile == CRYPTO_EQUITY_COMBO_PROFILE:
+            params = {"min_history_days": COMBO_DEFAULT_MIN_HISTORY_DAYS, "combo_mode": "dynamic"}
+        else:
+            params = {"min_history_days": DEFAULT_MIN_HISTORY_DAYS, "top_n": 2, "rebalance_every": 7}
         result = runner.run(args.profile, params)
         payload = {
             "profile": args.profile,
@@ -48,7 +53,7 @@ def main() -> int:
                 "max_drawdown": result.max_drawdown,
                 "cagr": result.cagr,
             },
-            "source": "CryptoLivePoolBacktestRunner",
+            "source": type(runner).__name__,
         }
 
     text = json.dumps(payload, indent=2, sort_keys=True, default=str)
