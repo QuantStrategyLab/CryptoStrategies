@@ -4,7 +4,10 @@
 from __future__ import annotations
 
 import argparse
+import copy
+import hashlib
 import json
+import re
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -45,6 +48,40 @@ def _result_payload(item: Any) -> dict[str, Any]:
     }
 
 
+def _baseline_param_set_id(profile: str, params: dict[str, Any]) -> str:
+    fingerprint = hashlib.sha256(json.dumps(params, sort_keys=True, default=str).encode("utf-8")).hexdigest()[:12]
+    return f"{profile}_baseline_{fingerprint}"
+
+
+def _current_qpk_pin() -> str:
+    text = (Path(__file__).resolve().parents[1] / "qsl.toml").read_text(encoding="utf-8")
+    match = re.search(r"QuantPlatformKit\.git@([0-9a-f]{40})", text)
+    return match.group(1) if match else "unknown"
+
+
+def _baseline_identity_params(
+    params: dict[str, Any],
+    *,
+    synthetic_days: int,
+    baseline_result: Any,
+) -> dict[str, Any]:
+    identity = copy.deepcopy(params)
+    identity["_baseline_start_date"] = baseline_result.start_date.isoformat() if baseline_result.start_date else None
+    identity["_baseline_end_date"] = baseline_result.end_date.isoformat() if baseline_result.end_date else None
+    identity["_qpk_pin"] = _current_qpk_pin()
+    identity["_synthetic_days"] = synthetic_days
+    return identity
+
+
+def _build_runner(*, profile: str, synthetic_days: int, panel: Any = None, market_history: Any = None):
+    return build_backtest_runner(
+        profile,
+        panel=panel,
+        market_history=market_history,
+        synthetic_days=synthetic_days,
+    )
+
+
 def run_walk_forward(
     *,
     profile: str,
@@ -61,21 +98,43 @@ def run_walk_forward(
         raise ValueError(f"unsupported profile={profile!r}; supported={sorted(SUPPORTED_PROFILES)}")
 
     params = dict(PROFILE_DEFAULTS.get(profile, {"min_history_days": DEFAULT_MIN_HISTORY_DAYS}))
-    runner = build_backtest_runner(
-        profile,
+    store = PerformanceStore(local_root=store_root) if store_root is not None else PerformanceStore.from_env()
+    orchestrator = BacktestOrchestrator(store=store)
+
+    baseline_params = copy.deepcopy(params)
+    runner = _build_runner(
+        profile=profile,
         panel=panel,
         market_history=market_history,
         synthetic_days=synthetic_days,
     )
-    store = PerformanceStore(local_root=store_root or Path("/tmp/crypto_wf_store"))
-    orchestrator = BacktestOrchestrator(store=store)
     orchestrator.register_runner("crypto", runner)
-
-    baseline = runner.run(profile, params)
+    baseline_probe = orchestrator.run(
+        profile,
+        domain="crypto",
+        params=copy.deepcopy(baseline_params),
+        param_set_id="__discarded__",
+        start_date=None,
+        end_date=None,
+    )
+    baseline_store_params = _baseline_identity_params(
+        baseline_params,
+        synthetic_days=synthetic_days,
+        baseline_result=baseline_probe,
+    )
+    baseline = orchestrator.run(
+        profile,
+        domain="crypto",
+        params=baseline_store_params,
+        param_set_id=_baseline_param_set_id(profile, baseline_store_params),
+        start_date=None,
+        end_date=None,
+    )
+    wf_params = copy.deepcopy(params)
     wf_results = orchestrator.walk_forward(
         profile,
         domain="crypto",
-        params=params,
+        params=wf_params,
         windows=windows,
         param_set_id=f"{profile}_wf",
     )
