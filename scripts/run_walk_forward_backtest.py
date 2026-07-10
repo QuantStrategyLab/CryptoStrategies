@@ -96,7 +96,9 @@ def _normalize_panel(panel: pd.DataFrame) -> pd.DataFrame:
     frame["final_score"] = pd.to_numeric(frame["final_score"], errors="coerce")
     frame["in_universe"] = frame["in_universe"].astype(str).str.lower().isin({"true", "1"})
     frame = frame.dropna(subset=["date", "symbol", "open", "final_score"])
-    return frame.drop_duplicates(["date", "symbol"], keep="last").set_index(["date", "symbol"]).sort_index()
+    if frame.duplicated(["date", "symbol"]).any():
+        raise ValueError("research panel contains duplicate date/symbol rows")
+    return frame.set_index(["date", "symbol"]).sort_index()
 
 
 def _normalize_market_history(market_history: pd.DataFrame) -> pd.DataFrame:
@@ -111,7 +113,10 @@ def _normalize_market_history(market_history: pd.DataFrame) -> pd.DataFrame:
     frame["date"] = pd.to_datetime(frame["date"], errors="coerce").dt.tz_localize(None).dt.normalize()
     frame["symbol"] = frame["symbol"].astype(str).str.strip().str.upper()
     frame["close"] = pd.to_numeric(frame["close"], errors="coerce")
-    return frame.dropna().drop_duplicates(["date", "symbol"], keep="last").sort_values(["date", "symbol"])
+    frame = frame.dropna()
+    if frame.duplicated(["date", "symbol"]).any():
+        raise ValueError("market history contains duplicate date/symbol rows")
+    return frame.sort_values(["date", "symbol"])
 
 
 def _fingerprint(*frames: pd.DataFrame) -> str:
@@ -136,7 +141,7 @@ def _shared_inputs(
     ]
     if normalized_panel.empty or normalized_panel.index.get_level_values("date").max() < pd.Timestamp(full_end) - pd.Timedelta(days=2):
         raise ValueError("research panel does not cover the latest walk-forward window")
-    if normalized_panel.groupby(level="date")["in_universe"].sum().max() < 2:
+    if normalized_panel.groupby(level="date")["in_universe"].sum().min() < 2:
         raise ValueError("research panel requires at least two in-universe symbols")
 
     normalized_history = _normalize_market_history(market_history)

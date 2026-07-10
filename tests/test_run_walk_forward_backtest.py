@@ -17,7 +17,13 @@ if str(SRC) not in sys.path:
 
 import scripts.run_walk_forward_backtest as walk_forward
 import crypto_strategies.backtest.orchestrator_runner as orchestrator_runner
-from scripts.run_walk_forward_backtest import _baseline_from_return_tail, _baseline_param_set_id, run_walk_forward
+from scripts.run_walk_forward_backtest import (
+    _baseline_from_return_tail,
+    _baseline_param_set_id,
+    _normalize_market_history,
+    _normalize_panel,
+    run_walk_forward,
+)
 
 
 def test_run_walk_forward_persists_lifecycle_baseline(tmp_path: Path) -> None:
@@ -142,3 +148,23 @@ def test_baseline_uses_exact_tail_of_full_return_stream() -> None:
     assert baseline.start_date == expected.index.min().date()
     assert baseline.end_date == expected.index.max().date()
     assert baseline.observation_count == len(expected)
+
+
+def test_external_inputs_reject_duplicate_keys() -> None:
+    duplicate_panel = pd.DataFrame(
+        [
+            {"date": "2024-01-01", "symbol": "BTCUSDT", "in_universe": True, "open": 1, "final_score": 1},
+            {"date": "2024-01-01", "symbol": "BTCUSDT", "in_universe": True, "open": 2, "final_score": 2},
+        ]
+    )
+    duplicate_history = pd.DataFrame(
+        [
+            {"date": "2024-01-01", "symbol": "BTCUSDT", "close": 1},
+            {"date": "2024-01-01", "symbol": "BTCUSDT", "close": 2},
+        ]
+    )
+
+    with pytest.raises(ValueError, match="research panel contains duplicate"):
+        _normalize_panel(duplicate_panel)
+    with pytest.raises(ValueError, match="market history contains duplicate"):
+        _normalize_market_history(duplicate_history)
