@@ -96,7 +96,7 @@ def run_walk_forward(
         raise ValueError(f"unsupported profile={profile!r}; supported={sorted(SUPPORTED_PROFILES)}")
 
     params = dict(PROFILE_DEFAULTS.get(profile, {"min_history_days": DEFAULT_MIN_HISTORY_DAYS}))
-    store = PerformanceStore(local_root=store_root or Path("/tmp/crypto_wf_store"))
+    store = PerformanceStore(local_root=store_root) if store_root is not None else PerformanceStore.from_env()
     orchestrator = BacktestOrchestrator(store=store)
 
     baseline_params = copy.deepcopy(params)
