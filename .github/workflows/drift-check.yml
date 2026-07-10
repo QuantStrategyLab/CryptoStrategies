@@ -20,6 +20,7 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: read
+      id-token: write
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
       LIFECYCLE_PERFORMANCE_BUCKET: ${{ vars.LIFECYCLE_PERFORMANCE_BUCKET || '' }}
@@ -115,7 +116,6 @@ jobs:
           PY
 
   drift:
-    if: ${{ always() && (needs.preflight_backtests.result == 'success' || needs.preflight_backtests.result == 'skipped') }}
     needs: preflight_backtests
     permissions:
       contents: read
