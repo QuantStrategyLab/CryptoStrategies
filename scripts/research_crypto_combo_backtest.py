@@ -503,7 +503,14 @@ def main() -> None:
     parser.add_argument(
         "--orchestrator",
         action="store_true",
-        help="Thin path via CryptoEquityComboBacktestRunner (single dynamic combo window).",
+        help="Deprecated compatibility flag; default path already uses BacktestOrchestrator.",
+    )
+    parser.add_argument(
+        "--legacy",
+        "--analysis",
+        dest="legacy",
+        action="store_true",
+        help="Run the legacy multi-strategy simulation path instead of BacktestOrchestrator.",
     )
     args = parser.parse_args()
 
@@ -515,10 +522,10 @@ def main() -> None:
     )
 
     print("Running backtest simulation ...", file=sys.stderr)
-    results = run_backtest(prices, orchestrator=args.orchestrator)
+    results = run_backtest(prices, orchestrator=not args.legacy)
     print("  Done.", file=sys.stderr)
 
-    if args.orchestrator:
+    if not args.legacy:
         payload = results["orchestrator"]
         text = json.dumps(
             {
