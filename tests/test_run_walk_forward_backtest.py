@@ -34,7 +34,7 @@ def test_run_walk_forward_persists_lifecycle_baseline(tmp_path: Path) -> None:
     baseline_records = [record for record in records if "_baseline_" in record["param_set_id"]]
     assert baseline_records
     assert baseline_records[-1]["params"] == {"min_history_days": 120, "top_n": 2, "rebalance_every": 7}
-    assert any("_wf" in record["param_set_id"] for record in records)
+    assert not any("_wf" in record["param_set_id"] for record in records)
 
 
 def test_baseline_param_set_id_tracks_synthetic_days() -> None:

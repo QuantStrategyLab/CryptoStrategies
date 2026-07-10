@@ -7,6 +7,7 @@ import argparse
 import copy
 import hashlib
 import json
+import tempfile
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -97,9 +98,8 @@ def run_walk_forward(
         raise ValueError(f"unsupported profile={profile!r}; supported={sorted(SUPPORTED_PROFILES)}")
 
     params = dict(PROFILE_DEFAULTS.get(profile, {"min_history_days": DEFAULT_MIN_HISTORY_DAYS}))
-    store = PerformanceStore(local_root=store_root or DEFAULT_STORE_ROOT)
-    orchestrator = BacktestOrchestrator(store=store)
-
+    target_root = store_root or DEFAULT_STORE_ROOT
+    target_root.mkdir(parents=True, exist_ok=True)
     baseline_params = copy.deepcopy(params)
     runner = _build_runner(
         profile=profile,
@@ -107,16 +107,18 @@ def run_walk_forward(
         market_history=market_history,
         synthetic_days=synthetic_days,
     )
-    orchestrator.register_runner("crypto", runner)
     baseline_raw = _run_baseline(runner, profile, copy.deepcopy(baseline_params))
-    wf_params = copy.deepcopy(params)
-    wf_results = orchestrator.walk_forward(
-        profile,
-        domain="crypto",
-        params=wf_params,
-        windows=windows,
-        param_set_id=f"{profile}_wf",
-    )
+    with tempfile.TemporaryDirectory(prefix=f"{profile}_wf_", dir=target_root) as scratch_dir:
+        scratch_orchestrator = BacktestOrchestrator(store=PerformanceStore(local_root=Path(scratch_dir)))
+        scratch_orchestrator.register_runner("crypto", runner)
+        wf_results = scratch_orchestrator.walk_forward(
+            profile,
+            domain="crypto",
+            params=copy.deepcopy(params),
+            windows=windows,
+            param_set_id=f"{profile}_wf",
+        )
+    orchestrator = BacktestOrchestrator(store=PerformanceStore(local_root=target_root))
     baseline = orchestrator.persist_result(
         baseline_raw,
         strategy_profile=profile,
