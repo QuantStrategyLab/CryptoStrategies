@@ -8,6 +8,7 @@ import copy
 import hashlib
 import json
 import tempfile
+from dataclasses import replace
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -21,6 +22,7 @@ from crypto_strategies.backtest.orchestrator_runner import (
     SUPPORTED_PROFILES,
     build_backtest_runner,
 )
+from crypto_strategies.backtest.live_pool_simulator import _performance_metrics
 from crypto_strategies.strategies.crypto_equity_combo import PROFILE_NAME as CRYPTO_EQUITY_COMBO_PROFILE
 
 DEFAULT_WINDOWS: tuple[tuple[date, date], ...] = (
@@ -177,6 +179,26 @@ def _write_return_matrix(
     frame.reset_index().to_csv(output_path, index=False)
 
 
+def _baseline_from_return_tail(full_result: Any, returns: pd.Series) -> Any:
+    tail = returns.tail(DRIFT_BASELINE_HORIZON_DAYS)
+    metrics = _performance_metrics(tail)
+    max_drawdown = float(metrics["Max Drawdown"])
+    cagr = float(metrics["CAGR"])
+    return replace(
+        full_result,
+        sharpe_ratio=float(metrics["Sharpe"]),
+        calmar_ratio=abs(cagr / max_drawdown) if max_drawdown else None,
+        max_drawdown=max_drawdown,
+        cagr=cagr,
+        volatility=float(metrics["Annualized Volatility"]),
+        win_rate=float(metrics["Win Rate"]),
+        total_return=float(metrics["total_return"]),
+        start_date=tail.index.min().date(),
+        end_date=tail.index.max().date(),
+        observation_count=int(metrics["Trading Days"]),
+    )
+
+
 def run_walk_forward(
     *,
     profile: str,
@@ -214,7 +236,7 @@ def run_walk_forward(
     )
     full_start = min(start for start, _ in windows)
     baseline_end = max(end for _, end in windows)
-    return_matrix_runner.run(
+    full_window_raw = return_matrix_runner.run(
         profile,
         copy.deepcopy(baseline_params),
         start_date=full_start,
@@ -223,19 +245,7 @@ def run_walk_forward(
     full_window_returns = return_matrix_runner.last_daily_returns
     if len(full_window_returns) < DRIFT_BASELINE_HORIZON_DAYS:
         raise ValueError("full-window returns do not cover the 126-day drift baseline")
-    baseline_start = full_window_returns.index[-DRIFT_BASELINE_HORIZON_DAYS].date()
-    baseline_runner = _build_runner(
-        profile=profile,
-        panel=shared_panel,
-        market_history=shared_market_history,
-        synthetic_days=synthetic_days,
-    )
-    baseline_raw = baseline_runner.run(
-        profile,
-        copy.deepcopy(baseline_params),
-        start_date=baseline_start,
-        end_date=baseline_end,
-    )
+    baseline_raw = _baseline_from_return_tail(full_window_raw, full_window_returns)
     with tempfile.TemporaryDirectory(prefix=f"{profile}_wf_", dir=target_root) as scratch_dir:
         scratch_orchestrator = BacktestOrchestrator(store=PerformanceStore(local_root=Path(scratch_dir)))
         scratch_orchestrator.register_runner(

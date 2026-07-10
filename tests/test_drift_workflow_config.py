@@ -8,6 +8,7 @@ def test_drift_workflow_wires_real_pipeline_inputs_and_preflight_bundle() -> Non
     assert "needs: preflight_backtests" in workflow
     assert "Download latest trusted lifecycle inputs" in workflow
     assert "gh api --paginate --slurp" in workflow
+    assert "trusted-snapshot-runs.json" in workflow
     assert "crypto-lifecycle-inputs-" in workflow
     assert '"path": ".github/workflows/publish-lifecycle-inputs.yml"' in workflow
     assert '"conclusion": "success"' in workflow

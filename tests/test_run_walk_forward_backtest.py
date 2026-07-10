@@ -17,7 +17,7 @@ if str(SRC) not in sys.path:
 
 import scripts.run_walk_forward_backtest as walk_forward
 import crypto_strategies.backtest.orchestrator_runner as orchestrator_runner
-from scripts.run_walk_forward_backtest import _baseline_param_set_id, run_walk_forward
+from scripts.run_walk_forward_backtest import _baseline_from_return_tail, _baseline_param_set_id, run_walk_forward
 
 
 def test_run_walk_forward_persists_lifecycle_baseline(tmp_path: Path) -> None:
@@ -125,3 +125,20 @@ def test_run_walk_forward_uses_real_panel_and_writes_return_matrix(
     assert payload["baseline"]["observation_count"] == 126
     assert {"as_of", "crypto_live_pool_rotation", "buy_hold_BTC"} <= set(return_matrix.columns)
     assert len(return_matrix) > payload["baseline"]["observation_count"]
+
+
+def test_baseline_uses_exact_tail_of_full_return_stream() -> None:
+    from quant_platform_kit.strategy_lifecycle.contracts import BacktestResult
+
+    index = pd.date_range("2024-01-01", periods=200, freq="D")
+    returns = pd.Series(range(200), index=index, dtype=float) / 100000
+    full_result = BacktestResult(
+        strategy_profile="crypto_live_pool_rotation", domain="crypto", param_set_id="", params={}
+    )
+
+    baseline = _baseline_from_return_tail(full_result, returns)
+
+    expected = returns.tail(126)
+    assert baseline.start_date == expected.index.min().date()
+    assert baseline.end_date == expected.index.max().date()
+    assert baseline.observation_count == len(expected)

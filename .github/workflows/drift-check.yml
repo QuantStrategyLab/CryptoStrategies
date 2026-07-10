@@ -49,18 +49,26 @@ jobs:
             echo "::error::SNAPSHOT_REPOSITORY_TOKEN is required for lifecycle input artifact access"
             exit 1
           fi
-          gh api --paginate --slurp             "/repos/QuantStrategyLab/CryptoLivePoolPipelines/actions/artifacts?per_page=100"             > "${RUNNER_TEMP}/snapshot-artifacts.json"
+          gh api --paginate --slurp \
+            "/repos/QuantStrategyLab/CryptoLivePoolPipelines/actions/artifacts?per_page=100" \
+            > "${RUNNER_TEMP}/snapshot-artifacts.json"
+          gh api --paginate --slurp \
+            "/repos/QuantStrategyLab/CryptoLivePoolPipelines/actions/workflows/publish-lifecycle-inputs.yml/runs?branch=main&status=success&per_page=100" \
+            > "${RUNNER_TEMP}/trusted-snapshot-runs.json"
           python - <<'PY' > "${RUNNER_TEMP}/snapshot-artifact-selection.txt"
           import json
           import os
           from pathlib import Path
           pages = json.loads((Path(os.environ["RUNNER_TEMP"]) / "snapshot-artifacts.json").read_text())
+          run_pages = json.loads((Path(os.environ["RUNNER_TEMP"]) / "trusted-snapshot-runs.json").read_text())
           artifacts = [item for page in pages for item in page.get("artifacts", [])]
+          trusted_run_ids = {run["id"] for page in run_pages for run in page.get("workflow_runs", [])}
           candidates = [
               item for item in artifacts
               if not item.get("expired")
               and str(item.get("name", "")).startswith("crypto-lifecycle-inputs-")
               and item.get("workflow_run", {}).get("head_branch") == "main"
+              and item.get("workflow_run", {}).get("id") in trusted_run_ids
           ]
           if not candidates:
               raise SystemExit("no trusted crypto lifecycle input artifact is available")
@@ -68,7 +76,8 @@ jobs:
           print(selected["id"], selected["workflow_run"]["id"])
           PY
           read -r artifact_id workflow_run_id < "${RUNNER_TEMP}/snapshot-artifact-selection.txt"
-          gh api "/repos/QuantStrategyLab/CryptoLivePoolPipelines/actions/runs/${workflow_run_id}"             > "${RUNNER_TEMP}/snapshot-workflow-run.json"
+          gh api "/repos/QuantStrategyLab/CryptoLivePoolPipelines/actions/runs/${workflow_run_id}" \
+            > "${RUNNER_TEMP}/snapshot-workflow-run.json"
           python - <<'PY'
           import json
           import os
@@ -85,7 +94,8 @@ jobs:
           if mismatches:
               raise SystemExit(f"lifecycle input provenance check failed: {mismatches}")
           PY
-          gh api "/repos/QuantStrategyLab/CryptoLivePoolPipelines/actions/artifacts/${artifact_id}/zip"             > "${RUNNER_TEMP}/snapshot-artifact.zip"
+          gh api "/repos/QuantStrategyLab/CryptoLivePoolPipelines/actions/artifacts/${artifact_id}/zip" \
+            > "${RUNNER_TEMP}/snapshot-artifact.zip"
           python - <<'PY'
           import os
           import zipfile
