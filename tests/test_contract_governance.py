@@ -35,10 +35,6 @@ BANNED_SOURCE_SNIPPETS = (
     "binance",
     "BINANCE_",
 )
-QPK_HEALTH_COMMIT = "69a0256934d081b5ef309a885384b9eb9f62cf90"
-QPK_OLD_HEALTHLESS_COMMIT = "86f03fb8e83c0d372f4e1c64cccf3e6da50b8dd4"
-
-
 class ContractGovernanceTests(unittest.TestCase):
     def test_required_inputs_are_canonical(self) -> None:
         for profile, definition in get_strategy_definitions().items():
@@ -131,17 +127,20 @@ class ContractGovernanceTests(unittest.TestCase):
                     with self.subTest(path=str(path.relative_to(root.parent.parent)), snippet=snippet):
                         self.assertNotIn(snippet.lower(), text)
 
-    def test_qpk_dependency_includes_shared_health_module_release(self) -> None:
+    def test_qpk_dependency_matches_lock_and_compat_metadata(self) -> None:
         pyproject = tomllib.loads((PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
         dependencies = pyproject["project"]["dependencies"]
         qpk_dependencies = [dep for dep in dependencies if dep.startswith("quant-platform-kit @ ")]
-        expected_dependency = (
-            "quant-platform-kit @ "
-            f"git+https://github.com/QuantStrategyLab/QuantPlatformKit.git@{QPK_HEALTH_COMMIT}"
-        )
+        qsl = tomllib.loads((PROJECT_ROOT / "qsl.toml").read_text(encoding="utf-8"))
 
-        self.assertEqual(qpk_dependencies, [expected_dependency])
-        self.assertNotIn(QPK_OLD_HEALTHLESS_COMMIT, qpk_dependencies[0])
+        self.assertEqual(len(qpk_dependencies), 1)
+        qpk_dependency = qpk_dependencies[0]
+        qpk_pin = qpk_dependency.rsplit("@", maxsplit=1)[1]
+        self.assertIn(qpk_dependency, qsl["compat"]["requires"])
+        self.assertIn(
+            f"QuantPlatformKit.git?rev={qpk_pin}#{qpk_pin}",
+            (PROJECT_ROOT / "uv.lock").read_text(encoding="utf-8"),
+        )
 
 
 if __name__ == "__main__":
