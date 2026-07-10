@@ -65,6 +65,21 @@ def _build_runner(*, profile: str, synthetic_days: int, panel: Any = None, marke
     )
 
 
+def _run_baseline(runner: Any, profile: str, params: dict[str, Any]) -> Any:
+    try:
+        return runner.run(
+            profile,
+            params,
+            start_date=None,
+            end_date=None,
+        )
+    except TypeError as exc:
+        message = str(exc)
+        if "start_date" not in message and "end_date" not in message:
+            raise
+        return runner.run(profile, params)
+
+
 def run_walk_forward(
     *,
     profile: str,
@@ -92,12 +107,7 @@ def run_walk_forward(
         synthetic_days=synthetic_days,
     )
     orchestrator.register_runner("crypto", runner)
-    baseline_raw = runner.run(
-        profile,
-        copy.deepcopy(baseline_params),
-        start_date=None,
-        end_date=None,
-    )
+    baseline_raw = _run_baseline(runner, profile, copy.deepcopy(baseline_params))
     wf_params = copy.deepcopy(params)
     wf_results = orchestrator.walk_forward(
         profile,
