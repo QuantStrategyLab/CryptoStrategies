@@ -24,6 +24,7 @@ DEFAULT_WINDOWS: tuple[tuple[date, date], ...] = (
     (date(2023, 6, 1), date(2024, 5, 31)),
     (date(2024, 6, 1), date(2025, 5, 31)),
 )
+DEFAULT_STORE_ROOT = Path("/tmp/crypto_wf_store")
 
 PROFILE_DEFAULTS: dict[str, dict[str, Any]] = {
     PROFILE_NAME: {"min_history_days": DEFAULT_MIN_HISTORY_DAYS, "top_n": 2, "rebalance_every": 7},
@@ -96,7 +97,7 @@ def run_walk_forward(
         raise ValueError(f"unsupported profile={profile!r}; supported={sorted(SUPPORTED_PROFILES)}")
 
     params = dict(PROFILE_DEFAULTS.get(profile, {"min_history_days": DEFAULT_MIN_HISTORY_DAYS}))
-    store = PerformanceStore(local_root=store_root) if store_root is not None else PerformanceStore.from_env()
+    store = PerformanceStore(local_root=store_root or DEFAULT_STORE_ROOT)
     orchestrator = BacktestOrchestrator(store=store)
 
     baseline_params = copy.deepcopy(params)

@@ -14,6 +14,7 @@ if str(QPK_SRC) not in sys.path:
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
+import scripts.run_walk_forward_backtest as walk_forward
 from scripts.run_walk_forward_backtest import _baseline_param_set_id, run_walk_forward
 
 
@@ -65,3 +66,11 @@ def test_run_walk_forward_does_not_persist_partial_results_on_failure(tmp_path: 
             store_root=tmp_path,
         )
     assert not list(tmp_path.rglob("*.json"))
+
+
+def test_run_walk_forward_keeps_local_default_store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(walk_forward, "DEFAULT_STORE_ROOT", tmp_path)
+
+    run_walk_forward(profile="crypto_live_pool_rotation", synthetic_days=2200)
+
+    assert list(tmp_path.rglob("*.json"))
