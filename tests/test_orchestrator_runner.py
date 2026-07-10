@@ -39,6 +39,10 @@ class CryptoOrchestratorRunnerTests(unittest.TestCase):
         self.assertEqual(result.strategy_profile, PROFILE_NAME)
         self.assertEqual(result.domain, "crypto")
         self.assertGreater(result.observation_count, 0)
+        self.assertFalse(runner.last_daily_returns.empty)
+        self.assertGreaterEqual(runner.last_daily_returns.index.min().date(), date(2023, 6, 1))
+        self.assertLessEqual(runner.last_daily_returns.index.max().date(), date(2024, 6, 1))
+        self.assertEqual(result.observation_count, len(runner.last_daily_returns))
 
     def test_walk_forward_produces_one_result_per_window(self) -> None:
         from pathlib import Path
@@ -74,6 +78,10 @@ class CryptoEquityComboBacktestRunnerTests(unittest.TestCase):
         self.assertEqual(result.strategy_profile, CRYPTO_EQUITY_COMBO_PROFILE)
         self.assertEqual(result.domain, "crypto")
         self.assertGreater(result.observation_count, 0)
+        self.assertFalse(runner.last_daily_returns.empty)
+        self.assertGreaterEqual(runner.last_daily_returns.index.min().date(), date(2023, 6, 1))
+        self.assertLessEqual(runner.last_daily_returns.index.max().date(), date(2024, 6, 1))
+        self.assertEqual(result.observation_count, len(runner.last_daily_returns))
 
     def test_invalid_combo_mode_raises(self) -> None:
         runner = CryptoEquityComboBacktestRunner(synthetic_days=1600)
