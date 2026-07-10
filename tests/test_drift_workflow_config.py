@@ -16,6 +16,8 @@ def test_drift_workflow_wires_pipeline_repo_and_lifecycle_env() -> None:
     assert '"--store-root"' in workflow
     assert "LIFECYCLE_PREFLIGHT_STAGING_ROOT" in workflow
     assert "Promote staged lifecycle backtests" in workflow
+    assert "github.ref == format('refs/heads/{0}', github.event.repository.default_branch)" in workflow
+    assert "needs.preflight_backtests.result == 'skipped'" in workflow
     assert "head.repo.full_name == github.repository" in workflow
     assert "id-token: write" in workflow
     assert "uses: QuantStrategyLab/QuantPlatformKit/.github/workflows/reusable-drift-check.yml@17278db4e7aef0007346d853eb308b6c1bd8c859" in workflow
