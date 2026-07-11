@@ -145,10 +145,15 @@ class CryptoLivePoolBacktestRunner:
         self._panel = panel
         self._synthetic_days = int(synthetic_days)
         self._last_daily_returns = pd.Series(dtype=float)
+        self._run_return_history: list[pd.Series] = []
 
     @property
     def last_daily_returns(self) -> pd.Series:
         return self._last_daily_returns.copy()
+
+    @property
+    def run_return_history(self) -> tuple[pd.Series, ...]:
+        return tuple(item.copy() for item in self._run_return_history)
 
     def run(
         self,
@@ -186,6 +191,7 @@ class CryptoLivePoolBacktestRunner:
             start_date=start_date,
             end_date=end_date,
         )
+        self._run_return_history.append(self._last_daily_returns.copy())
         elapsed = (datetime.now(timezone.utc) - started).total_seconds()
         eval_dates = sliced.index.get_level_values("date")
         return _metrics_to_result(
@@ -210,10 +216,15 @@ class CryptoEquityComboBacktestRunner:
         self._market_history = market_history
         self._synthetic_days = int(synthetic_days)
         self._last_daily_returns = pd.Series(dtype=float)
+        self._run_return_history: list[pd.Series] = []
 
     @property
     def last_daily_returns(self) -> pd.Series:
         return self._last_daily_returns.copy()
+
+    @property
+    def run_return_history(self) -> tuple[pd.Series, ...]:
+        return tuple(item.copy() for item in self._run_return_history)
 
     def run(
         self,
@@ -260,6 +271,7 @@ class CryptoEquityComboBacktestRunner:
             start_date=start_date,
             end_date=end_date,
         )
+        self._run_return_history.append(self._last_daily_returns.copy())
         elapsed = (datetime.now(timezone.utc) - started).total_seconds()
         eval_frame = sliced
         if start_date is not None:

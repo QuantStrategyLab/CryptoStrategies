@@ -233,34 +233,17 @@ def run_walk_forward(
             panel=panel,
             market_history=market_history,
         )
-    return_matrix_runner = _build_runner(
-        profile=profile,
-        panel=shared_panel,
-        market_history=shared_market_history,
-        synthetic_days=synthetic_days,
-    )
-    full_start = min(start for start, _ in windows)
-    baseline_end = max(end for _, end in windows)
-    full_window_raw = return_matrix_runner.run(
-        profile,
-        copy.deepcopy(baseline_params),
-        start_date=full_start,
-        end_date=baseline_end,
-    )
-    full_window_returns = return_matrix_runner.last_daily_returns
-    if len(full_window_returns) < DRIFT_BASELINE_HORIZON_DAYS:
-        raise ValueError("full-window returns do not cover the 126-day drift baseline")
-    baseline_raw = _baseline_from_return_tail(full_window_raw, full_window_returns)
     with tempfile.TemporaryDirectory(prefix=f"{profile}_wf_", dir=target_root) as scratch_dir:
         scratch_orchestrator = BacktestOrchestrator(store=PerformanceStore(local_root=Path(scratch_dir)))
+        walk_forward_runner = _build_runner(
+            profile=profile,
+            panel=shared_panel,
+            market_history=shared_market_history,
+            synthetic_days=synthetic_days,
+        )
         scratch_orchestrator.register_runner(
             "crypto",
-            _build_runner(
-                profile=profile,
-                panel=shared_panel,
-                market_history=shared_market_history,
-                synthetic_days=synthetic_days,
-            ),
+            walk_forward_runner,
         )
         wf_results = scratch_orchestrator.walk_forward(
             profile,
@@ -269,6 +252,10 @@ def run_walk_forward(
             windows=windows,
             param_set_id=f"{profile}_wf",
         )
+        full_window_returns = pd.concat(walk_forward_runner.run_return_history).sort_index()
+    if len(full_window_returns) < DRIFT_BASELINE_HORIZON_DAYS:
+        raise ValueError("walk-forward returns do not cover the 126-day drift baseline")
+    baseline_raw = _baseline_from_return_tail(wf_results[-1], full_window_returns)
     orchestrator = BacktestOrchestrator(store=PerformanceStore(local_root=target_root))
     baseline = orchestrator.persist_result(
         baseline_raw,

@@ -131,6 +131,7 @@ def test_run_walk_forward_uses_real_panel_and_writes_return_matrix(
     assert payload["baseline"]["observation_count"] == 126
     assert {"as_of", "crypto_live_pool_rotation", "buy_hold_BTC"} <= set(return_matrix.columns)
     assert len(return_matrix) > payload["baseline"]["observation_count"]
+    assert len(return_matrix) == sum(item["observation_count"] for item in payload["walk_forward_folds"])
 
 
 def test_baseline_uses_exact_tail_of_full_return_stream() -> None:

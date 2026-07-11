@@ -6,6 +6,10 @@ def test_drift_workflow_wires_real_pipeline_inputs_and_preflight_bundle() -> Non
 
     assert "preflight_backtests:" in workflow
     assert "needs: preflight_backtests" in workflow
+    assert "snapshot_repository_ref: ${{ steps.snapshot-input.outputs.snapshot_repository_ref }}" in workflow
+    assert "id: snapshot-input" in workflow
+    assert 'print(run["head_sha"])' in workflow
+    assert "snapshot_repository_ref: ${{ needs.preflight_backtests.outputs.snapshot_repository_ref }}" in workflow
     assert "Download latest trusted lifecycle inputs" in workflow
     assert "gh api --paginate --slurp" in workflow
     assert "trusted-snapshot-runs.json" in workflow
@@ -15,7 +19,7 @@ def test_drift_workflow_wires_real_pipeline_inputs_and_preflight_bundle() -> Non
     assert "research_panel.csv.gz" in workflow
     assert "market_history.csv.gz" in workflow
     assert "repository: QuantStrategyLab/QuantPlatformKit" in workflow
-    assert "ref: 9bb8f31e898ea238a6446472f9f5e58133128d0c" in workflow
+    assert "ref: bda6afdab0a2dd693c35d14493176829f4da1231" in workflow
     assert "python -m pip install --no-deps -e external/QuantPlatformKit" in workflow
     assert "scripts/run_walk_forward_backtest.py" in workflow
     assert '"--list-profiles"' in workflow
@@ -25,7 +29,7 @@ def test_drift_workflow_wires_real_pipeline_inputs_and_preflight_bundle() -> Non
     assert "Upload lifecycle preflight artifact" in workflow
     assert "lifecycle-preflight-${{ github.run_id }}-${{ github.run_attempt }}" in workflow
     assert workflow.count("github.ref == format('refs/heads/{0}', github.event.repository.default_branch)") == 2
-    assert "uses: QuantStrategyLab/QuantPlatformKit/.github/workflows/reusable-drift-check.yml@9bb8f31e898ea238a6446472f9f5e58133128d0c" in workflow
+    assert "uses: QuantStrategyLab/QuantPlatformKit/.github/workflows/reusable-drift-check.yml@bda6afdab0a2dd693c35d14493176829f4da1231" in workflow
     assert "strategy_domain: crypto" in workflow
     assert "snapshot_repository: QuantStrategyLab/CryptoLivePoolPipelines" in workflow
     assert "snapshot_checkout_path: external/CryptoLivePoolPipelines" in workflow
