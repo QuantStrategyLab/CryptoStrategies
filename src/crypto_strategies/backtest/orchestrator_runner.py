@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 
 from crypto_strategies.backtest.combo_simulator import ComboMode, CryptoComboBacktestConfig, run_combo_backtest
-from crypto_strategies.backtest.live_pool_simulator import run_live_pool_rotation_backtest
+from crypto_strategies.backtest.live_pool_simulator import _performance_metrics, run_live_pool_rotation_backtest
 from crypto_strategies.strategies.crypto_equity_combo import PROFILE_NAME as CRYPTO_EQUITY_COMBO_PROFILE
 
 try:
@@ -88,6 +88,21 @@ def _slice_history(
     return frame.sort_values(["date", "symbol"]).reset_index(drop=True)
 
 
+def _slice_daily_returns(
+    returns: pd.Series,
+    *,
+    start_date: date | None,
+    end_date: date | None,
+) -> pd.Series:
+    sliced = returns.copy()
+    sliced.index = pd.to_datetime(sliced.index, utc=False).tz_localize(None).normalize()
+    if start_date is not None:
+        sliced = sliced.loc[sliced.index >= pd.Timestamp(start_date)]
+    if end_date is not None:
+        sliced = sliced.loc[sliced.index <= pd.Timestamp(end_date)]
+    return sliced
+
+
 def _metrics_to_result(
     *,
     strategy_profile: str,
@@ -129,6 +144,16 @@ class CryptoLivePoolBacktestRunner:
     def __init__(self, *, panel: pd.DataFrame | None = None, synthetic_days: int = 1600) -> None:
         self._panel = panel
         self._synthetic_days = int(synthetic_days)
+        self._last_daily_returns = pd.Series(dtype=float)
+        self._run_return_history: list[pd.Series] = []
+
+    @property
+    def last_daily_returns(self) -> pd.Series:
+        return self._last_daily_returns.copy()
+
+    @property
+    def run_return_history(self) -> tuple[pd.Series, ...]:
+        return tuple(item.copy() for item in self._run_return_history)
 
     def run(
         self,
@@ -161,12 +186,18 @@ class CryptoLivePoolBacktestRunner:
             top_n=int(params.get("top_n", 2)),
             rebalance_every=int(params.get("rebalance_every", 7)),
         )
+        self._last_daily_returns = _slice_daily_returns(
+            result.returns,
+            start_date=start_date,
+            end_date=end_date,
+        )
+        self._run_return_history.append(self._last_daily_returns.copy())
         elapsed = (datetime.now(timezone.utc) - started).total_seconds()
         eval_dates = sliced.index.get_level_values("date")
         return _metrics_to_result(
             strategy_profile=strategy_profile,
             params=params,
-            metrics=result.metrics,
+            metrics=_performance_metrics(self._last_daily_returns),
             start_date=start_date or eval_dates.min().date(),
             end_date=end_date or eval_dates.max().date(),
             run_duration_seconds=elapsed,
@@ -184,6 +215,16 @@ class CryptoEquityComboBacktestRunner:
     ) -> None:
         self._market_history = market_history
         self._synthetic_days = int(synthetic_days)
+        self._last_daily_returns = pd.Series(dtype=float)
+        self._run_return_history: list[pd.Series] = []
+
+    @property
+    def last_daily_returns(self) -> pd.Series:
+        return self._last_daily_returns.copy()
+
+    @property
+    def run_return_history(self) -> tuple[pd.Series, ...]:
+        return tuple(item.copy() for item in self._run_return_history)
 
     def run(
         self,
@@ -225,6 +266,12 @@ class CryptoEquityComboBacktestRunner:
                 min_history_days=min_history_days,
             ),
         )
+        self._last_daily_returns = _slice_daily_returns(
+            result.returns,
+            start_date=start_date,
+            end_date=end_date,
+        )
+        self._run_return_history.append(self._last_daily_returns.copy())
         elapsed = (datetime.now(timezone.utc) - started).total_seconds()
         eval_frame = sliced
         if start_date is not None:
@@ -232,7 +279,7 @@ class CryptoEquityComboBacktestRunner:
         return _metrics_to_result(
             strategy_profile=strategy_profile,
             params=params,
-            metrics=result.metrics,
+            metrics=_performance_metrics(self._last_daily_returns),
             start_date=start_date or (eval_frame["date"].min().date() if not eval_frame.empty else None),
             end_date=end_date or (eval_frame["date"].max().date() if not eval_frame.empty else None),
             run_duration_seconds=elapsed,
