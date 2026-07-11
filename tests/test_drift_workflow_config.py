@@ -35,4 +35,4 @@ def test_drift_workflow_wires_real_pipeline_inputs_and_preflight_bundle() -> Non
     assert "snapshot_checkout_path: external/CryptoLivePoolPipelines" in workflow
     assert "lifecycle_preflight_artifact: lifecycle-preflight-${{ github.run_id }}-${{ github.run_attempt }}" in workflow
     assert "codex_audit_service_url: ${{ secrets.CODEX_AUDIT_SERVICE_URL }}" in workflow
-    assert "secrets.SNAPSHOT_REPOSITORY_TOKEN || secrets.QSL_REPO_SYNC_TOKEN" in workflow
+    assert "secrets.SNAPSHOT_REPOSITORY_TOKEN || secrets.QSL_REPO_SYNC_TOKEN || github.token" in workflow
