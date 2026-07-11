@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
+from quant_platform_kit.strategy_lifecycle.performance_metrics import compute_window_metrics
 
 from crypto_strategies.backtest.orchestrator_runner import (
     COMBO_DEFAULT_MIN_HISTORY_DAYS,
@@ -22,7 +23,6 @@ from crypto_strategies.backtest.orchestrator_runner import (
     SUPPORTED_PROFILES,
     build_backtest_runner,
 )
-from crypto_strategies.backtest.live_pool_simulator import _performance_metrics
 from crypto_strategies.strategies.crypto_equity_combo import PROFILE_NAME as CRYPTO_EQUITY_COMBO_PROFILE
 
 DEFAULT_WINDOWS: tuple[tuple[date, date], ...] = (
@@ -95,7 +95,7 @@ def _normalize_panel(panel: pd.DataFrame) -> pd.DataFrame:
     frame["open"] = pd.to_numeric(frame["open"], errors="coerce")
     frame["final_score"] = pd.to_numeric(frame["final_score"], errors="coerce")
     frame["in_universe"] = frame["in_universe"].astype(str).str.lower().isin({"true", "1"})
-    frame = frame.dropna(subset=["date", "symbol", "open", "final_score"])
+    frame = frame.dropna(subset=["date", "symbol", "open"])
     if frame.duplicated(["date", "symbol"]).any():
         raise ValueError("research panel contains duplicate date/symbol rows")
     return frame.set_index(["date", "symbol"]).sort_index()
@@ -137,18 +137,23 @@ def _shared_inputs(
     normalized_panel = _normalize_panel(panel)
     panel_dates = normalized_panel.index.get_level_values("date")
     normalized_panel = normalized_panel.loc[
-        (panel_dates >= pd.Timestamp(full_start)) & (panel_dates <= pd.Timestamp(full_end))
+        panel_dates >= pd.Timestamp(full_start)
     ]
     if normalized_panel.empty or normalized_panel.index.get_level_values("date").max() < pd.Timestamp(full_end) - pd.Timedelta(days=2):
         raise ValueError("research panel does not cover the latest walk-forward window")
-    if normalized_panel.groupby(level="date")["in_universe"].sum().min() < 2:
+    scored_panel = normalized_panel.dropna(subset=["final_score"])
+    if scored_panel.groupby(level="date")["in_universe"].sum().min() < 2:
         raise ValueError("research panel requires at least two in-universe symbols")
 
     normalized_history = _normalize_market_history(market_history)
     lookback_start = pd.Timestamp(full_start) - pd.Timedelta(days=COMBO_DEFAULT_MIN_HISTORY_DAYS + 5)
+    current_end = min(
+        normalized_panel.index.get_level_values("date").max(),
+        normalized_history["date"].max(),
+    )
     normalized_history = normalized_history.loc[
         (normalized_history["date"] >= lookback_start)
-        & (normalized_history["date"] <= pd.Timestamp(full_end))
+        & (normalized_history["date"] <= current_end)
     ].copy()
     required_symbols = {"BTCUSDT", "ETHUSDT"}
     missing_symbols = sorted(required_symbols - set(normalized_history["symbol"]))
@@ -186,21 +191,21 @@ def _write_return_matrix(
 
 def _baseline_from_return_tail(full_result: Any, returns: pd.Series) -> Any:
     tail = returns.tail(DRIFT_BASELINE_HORIZON_DAYS)
-    metrics = _performance_metrics(tail)
-    max_drawdown = float(metrics["Max Drawdown"])
-    cagr = float(metrics["CAGR"])
+    metrics = compute_window_metrics(tail, window_days=DRIFT_BASELINE_HORIZON_DAYS)
+    max_drawdown = float(metrics.max_drawdown)
+    cagr = float(metrics.cagr)
     return replace(
         full_result,
-        sharpe_ratio=float(metrics["Sharpe"]),
-        calmar_ratio=abs(cagr / max_drawdown) if max_drawdown else None,
+        sharpe_ratio=float(metrics.sharpe_ratio),
+        calmar_ratio=float(metrics.calmar_ratio),
         max_drawdown=max_drawdown,
         cagr=cagr,
-        volatility=float(metrics["Annualized Volatility"]),
-        win_rate=float(metrics["Win Rate"]),
-        total_return=float(metrics["total_return"]),
-        start_date=tail.index.min().date(),
-        end_date=tail.index.max().date(),
-        observation_count=int(metrics["Trading Days"]),
+        volatility=float(metrics.volatility),
+        win_rate=float(metrics.win_rate),
+        total_return=float(metrics.total_return),
+        start_date=metrics.start_date,
+        end_date=metrics.end_date,
+        observation_count=metrics.observation_count,
     )
 
 
@@ -273,10 +278,26 @@ def run_walk_forward(
     if returns_output is not None:
         if shared_market_history is None:
             raise ValueError("returns_output requires market_history")
+        current_end = min(
+            shared_panel.index.get_level_values("date").max(),
+            shared_market_history["date"].max(),
+        ).date()
+        current_runner = _build_runner(
+            profile=profile,
+            panel=shared_panel,
+            market_history=shared_market_history,
+            synthetic_days=synthetic_days,
+        )
+        current_runner.run(
+            profile,
+            copy.deepcopy(params),
+            start_date=min(start for start, _ in windows),
+            end_date=current_end,
+        )
         _write_return_matrix(
             returns_output,
             profile=profile,
-            returns=full_window_returns,
+            returns=current_runner.last_daily_returns,
             market_history=shared_market_history,
         )
     return {

@@ -88,7 +88,7 @@ def test_run_walk_forward_uses_real_panel_and_writes_return_matrix(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    dates = pd.date_range("2022-01-01", "2024-12-31", freq="D")
+    dates = pd.date_range("2022-01-01", "2025-02-28", freq="D")
     symbols = ("BTCUSDT", "ETHUSDT", "SOLUSDT")
     rows = []
     market_rows = []
@@ -131,7 +131,7 @@ def test_run_walk_forward_uses_real_panel_and_writes_return_matrix(
     assert payload["baseline"]["observation_count"] == 126
     assert {"as_of", "crypto_live_pool_rotation", "buy_hold_BTC"} <= set(return_matrix.columns)
     assert len(return_matrix) > payload["baseline"]["observation_count"]
-    assert len(return_matrix) == sum(item["observation_count"] for item in payload["walk_forward_folds"])
+    assert pd.Timestamp(return_matrix["as_of"].max()) > pd.Timestamp("2024-12-31")
 
 
 def test_baseline_uses_exact_tail_of_full_return_stream() -> None:
@@ -169,3 +169,22 @@ def test_external_inputs_reject_duplicate_keys() -> None:
         _normalize_panel(duplicate_panel)
     with pytest.raises(ValueError, match="market history contains duplicate"):
         _normalize_market_history(duplicate_history)
+
+
+def test_normalized_panel_preserves_unscored_open_rows() -> None:
+    panel = pd.DataFrame(
+        [
+            {
+                "date": "2024-01-01",
+                "symbol": "BTCUSDT",
+                "in_universe": False,
+                "open": 100.0,
+                "final_score": None,
+            }
+        ]
+    )
+
+    normalized = _normalize_panel(panel)
+
+    assert len(normalized) == 1
+    assert pd.isna(normalized.iloc[0]["final_score"])
