@@ -78,3 +78,40 @@ def test_apply_risk_gate_uses_member_evidence_and_zero_cap_clears_authority() ->
     assert assessment["mandate_id"] == "binance_crypto_research_only_v1"
     assert "private_position_rows" not in repr(assessment)
     assert "must-not-propagate" not in repr(assessment)
+
+
+def test_apply_risk_gate_preserves_stricter_strategy_concentration_cap() -> None:
+    now = datetime.now(timezone.utc)
+    mandate = _zero_cap_mandate(now)
+    mandate.update(
+        {
+            "mandate_id": "synthetic_algorithm_equivalence_only",
+            "effective_exposure_cap": 1.0,
+            "loss_budget": 1000.0,
+            "product_caps": {"BTCUSDT": 1.0},
+            "nominal_caps": {"BTCUSDT": 1.0},
+            "product_leverage_factors": {"BTCUSDT": 1},
+            "allowed_nonzero_assets": ["BTCUSDT"],
+        }
+    )
+    snapshot = PortfolioSnapshot(
+        as_of=now,
+        total_equity=1000.0,
+        metadata={"observed_effective_exposure": 0.0},
+    )
+    ctx = StrategyContext(
+        as_of=now,
+        portfolio=snapshot,
+        artifacts={"mandate_provenance": mandate},
+    )
+
+    result = apply_risk_gate(
+        StrategyDecision(positions=(PositionTarget(symbol="BTCUSDT", target_weight=0.6),)),
+        ctx=ctx,
+        max_single_weight=0.5,
+    )
+
+    assert result.diagnostics["member_risk_assessment"]["outcome"] == "APPROVE"
+    assert result.positions == ()
+    assert result.budgets == ()
+    assert "rejected:strategy_concentration" in result.risk_flags

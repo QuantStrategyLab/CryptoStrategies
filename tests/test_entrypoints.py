@@ -398,9 +398,9 @@ class CryptoStrategyEntrypointTests(unittest.TestCase):
             "APPROVE",
             decision.diagnostics["member_risk_assessment"],
         )
-        budget_map = {budget.name: budget.amount for budget in decision.budgets}
-        self.assertGreater(budget_map["trend_rotation_pool"], 0.0)
-        self.assertGreater(budget_map["btc_core_dca_pool"], 0.0)
+        self.assertEqual(decision.positions, ())
+        self.assertEqual(decision.budgets, ())
+        self.assertIn("rejected:strategy_concentration", decision.risk_flags)
         self.assertGreater(decision.diagnostics["btc_base_order_usdt"], 0.0)
         self.assertGreater(decision.diagnostics["btc_target_ratio"], 0.0)
         self.assertGreater(decision.diagnostics["trend_target_ratio"], 0.0)
@@ -465,18 +465,14 @@ class CryptoStrategyEntrypointTests(unittest.TestCase):
             resolve_authoritative_rotation_pool=lambda *_args, **_kwargs: ["ETHUSDT"],
             plan_trend_buys=lambda *_args, **_kwargs: ([], {}),
         )
-        now = _fresh_as_of()
-
-        with patch(
-            "crypto_strategies.entrypoints._load_legacy_modules",
-            return_value=(fake_core, fake_rotation),
-        ):
-            decision = entrypoint.evaluate(
+        def evaluate(prices, indicators):
+            now = _fresh_as_of()
+            return entrypoint.evaluate(
                 StrategyContext(
                     as_of=now,
                     market_data={
-                        "market_prices": {},
-                        "derived_indicators": {"ETHUSDT": {"sma60": 2600.0}},
+                        "market_prices": prices,
+                        "derived_indicators": {"ETHUSDT": indicators},
                         "benchmark_snapshot": {"regime_on": True},
                         "portfolio_snapshot": PortfolioSnapshot(
                             as_of=now,
@@ -494,7 +490,7 @@ class CryptoStrategyEntrypointTests(unittest.TestCase):
                                 "observed_effective_exposure": 0.0,
                             },
                         ),
-                        "universe_snapshot": ("ETHUSDT",),
+                        "universe_snapshot": (),
                     },
                     state={
                         "ETHUSDT": {
@@ -511,23 +507,29 @@ class CryptoStrategyEntrypointTests(unittest.TestCase):
                 )
             )
 
-        self.assertEqual(decision.positions, ())
-        self.assertEqual(decision.budgets, ())
-        self.assertIn("rejected:strategy_stop_input", decision.risk_flags)
-        self.assertEqual(
-            decision.diagnostics["strategy_stop_evaluation"],
-            {
-                "evaluated": True,
-                "policy_id": "crypto_live_pool_rotation.executable_stop",
-                "policy_version": "v1",
-                "evaluated_at": decision.diagnostics["member_risk_assessment"]["evaluated_at"],
-                "decision_digest_sha256": decision.diagnostics["member_risk_assessment"][
-                    "decision_digest_sha256"
-                ],
-                "outcome": "TRIGGERED",
-                "action_result": "BLOCKED",
-            },
-        )
+        with patch(
+            "crypto_strategies.entrypoints._load_legacy_modules",
+            return_value=(fake_core, fake_rotation),
+        ):
+            missing = evaluate({}, {"sma60": 2600.0})
+            triggered = evaluate(
+                {"ETHUSDT": 2000.0},
+                {"atr14": 100.0, "sma60": 2600.0},
+            )
+
+        for decision in (missing, triggered):
+            with self.subTest(decision=decision):
+                self.assertEqual(decision.positions, ())
+                self.assertEqual(decision.budgets, ())
+                self.assertEqual(
+                    decision.diagnostics["strategy_stop_evaluation"]["outcome"],
+                    "TRIGGERED",
+                )
+                self.assertEqual(
+                    decision.diagnostics["strategy_stop_evaluation"]["action_result"],
+                    "BLOCKED",
+                )
+        self.assertIn("rejected:strategy_stop_input", missing.risk_flags)
 
 
 if __name__ == "__main__":

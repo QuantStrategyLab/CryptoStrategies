@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from collections.abc import Mapping
 from dataclasses import asdict
 from typing import Any
@@ -50,6 +51,7 @@ def apply_risk_gate(
     decision: StrategyDecision,
     *,
     ctx: StrategyContext | None = None,
+    max_single_weight: float | None = None,
     portfolio_snapshot: Any | None = None,
     market_data: Mapping[str, Any] | None = None,
 ) -> StrategyDecision:
@@ -81,9 +83,24 @@ def apply_risk_gate(
     risk_flags = tuple(
         dict.fromkeys(tuple(decision.risk_flags or ()) + tuple(result.decision.risk_flags or ()))
     )
+    strategy_concentration_rejected = False
+    if max_single_weight is not None:
+        cap = float(max_single_weight)
+        if not math.isfinite(cap) or not 0.0 <= cap <= 1.0:
+            raise ValueError("max_single_weight must be finite and between 0 and 1")
+        strategy_concentration_rejected = any(
+            position.target_weight is not None
+            and (
+                not math.isfinite(float(position.target_weight))
+                or abs(float(position.target_weight)) > cap
+            )
+            for position in result.decision.positions
+        )
+    if strategy_concentration_rejected:
+        risk_flags = tuple(dict.fromkeys(risk_flags + ("rejected:strategy_concentration",)))
     return StrategyDecision(
-        positions=result.decision.positions,
-        budgets=result.decision.budgets,
+        positions=() if strategy_concentration_rejected else result.decision.positions,
+        budgets=() if strategy_concentration_rejected else result.decision.budgets,
         risk_flags=risk_flags,
         diagnostics={
             **dict(result.decision.diagnostics or {}),

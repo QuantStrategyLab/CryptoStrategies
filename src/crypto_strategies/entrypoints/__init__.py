@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from copy import deepcopy
+import math
 
 from quant_platform_kit.strategy_contracts import (
     BudgetIntent,
@@ -120,19 +121,27 @@ def _resolve_state_helpers(config: Mapping[str, object]):
     return _get_symbol_trade_state, _set_symbol_trade_state
 
 
-def _resolve_held_risk_symbols(ctx: StrategyContext, state, universe_symbols, get_symbol_trade_state_fn):
-    available = {str(symbol).strip().upper() for symbol in universe_symbols}
+def _resolve_held_risk_symbols(ctx: StrategyContext, state):
     held = {
-        symbol
-        for symbol in available
-        if get_symbol_trade_state_fn(state, symbol).get("is_holding")
+        str(symbol).strip().upper()
+        for symbol, payload in state.items()
+        if isinstance(payload, Mapping)
+        and payload.get("is_holding")
+        and str(symbol).strip().upper() != "BTCUSDT"
     }
     snapshot = _resolve_portfolio_snapshot(ctx)
     for position in getattr(snapshot, "positions", ()) or ():
         symbol = str(getattr(position, "symbol", "")).strip().upper()
         quantity = getattr(position, "quantity", 0.0)
         market_value = getattr(position, "market_value", 0.0)
-        if symbol in available and (quantity or market_value):
+        values = (quantity, market_value)
+        if symbol and symbol != "BTCUSDT" and any(
+            isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and math.isfinite(float(value))
+            and float(value) != 0.0
+            for value in values
+        ):
             held.add(symbol)
     return tuple(sorted(held))
 
@@ -184,8 +193,6 @@ def evaluate_crypto_live_pool_rotation(ctx: StrategyContext) -> StrategyDecision
     held_risk_symbols = _resolve_held_risk_symbols(
         ctx,
         working_state,
-        trend_universe_symbols,
-        get_symbol_trade_state_fn,
     )
     sell_reasons, stop_input_blocked = evaluate_held_trend_stops(
         working_state,
@@ -283,7 +290,7 @@ def evaluate_crypto_live_pool_rotation(ctx: StrategyContext) -> StrategyDecision
         risk_flags=risk_flags + (("rejected:strategy_stop_input",) if stop_input_blocked else ()),
         diagnostics=diagnostics,
     )
-    if stop_input_blocked:
+    if sell_reasons:
         decision = StrategyDecision(
             positions=(),
             budgets=(),
@@ -295,11 +302,7 @@ def evaluate_crypto_live_pool_rotation(ctx: StrategyContext) -> StrategyDecision
     stop_outcome = "TRIGGERED" if sell_reasons else "CLEAR"
     stop_action_result = "NOT_REQUIRED"
     if stop_outcome == "TRIGGERED":
-        stop_action_result = (
-            "COMPLETED"
-            if member_assessment["outcome"] == "APPROVE" and not stop_input_blocked
-            else "BLOCKED"
-        )
+        stop_action_result = "BLOCKED"
     decision = StrategyDecision(
         positions=decision.positions,
         budgets=decision.budgets,
@@ -402,7 +405,7 @@ def evaluate_crypto_btc_dca(ctx: StrategyContext) -> StrategyDecision:
         risk_flags=risk_flags,
         diagnostics=diagnostics,
     )
-    decision = apply_risk_gate(decision, ctx=ctx)
+    decision = apply_risk_gate(decision, ctx=ctx, max_single_weight=0.50)
     record_strategy_decision(
         ctx,
         decision,
@@ -492,7 +495,7 @@ def evaluate_crypto_trend_rotation(ctx: StrategyContext) -> StrategyDecision:
         risk_flags=risk_flags,
         diagnostics=diagnostics,
     )
-    decision = apply_risk_gate(decision, ctx=ctx)
+    decision = apply_risk_gate(decision, ctx=ctx, max_single_weight=0.30)
     record_strategy_decision(
         ctx,
         decision,
@@ -688,7 +691,7 @@ def evaluate_crypto_equity_combo(ctx: StrategyContext) -> StrategyDecision:
         risk_flags=risk_flags,
         diagnostics=diagnostics,
     )
-    decision = apply_risk_gate(decision, ctx=ctx)
+    decision = apply_risk_gate(decision, ctx=ctx, max_single_weight=0.30)
     record_strategy_decision(
         ctx,
         decision,
