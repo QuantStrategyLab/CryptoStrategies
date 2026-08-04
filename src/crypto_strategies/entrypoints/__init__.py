@@ -19,6 +19,10 @@ from crypto_strategies.manifests import (
 )
 
 from ._common import apply_risk_gate, record_strategy_decision
+from crypto_strategies.strategies.crypto_live_pool_rotation.rotation import (
+    build_strategy_stop_evaluation,
+    evaluate_held_trend_stops,
+)
 
 
 """Unified crypto strategy entrypoints built on top of legacy core/rotation modules."""
@@ -116,6 +120,23 @@ def _resolve_state_helpers(config: Mapping[str, object]):
     return _get_symbol_trade_state, _set_symbol_trade_state
 
 
+def _resolve_held_risk_symbols(ctx: StrategyContext, state, universe_symbols, get_symbol_trade_state_fn):
+    available = {str(symbol).strip().upper() for symbol in universe_symbols}
+    held = {
+        symbol
+        for symbol in available
+        if get_symbol_trade_state_fn(state, symbol).get("is_holding")
+    }
+    snapshot = _resolve_portfolio_snapshot(ctx)
+    for position in getattr(snapshot, "positions", ()) or ():
+        symbol = str(getattr(position, "symbol", "")).strip().upper()
+        quantity = getattr(position, "quantity", 0.0)
+        market_value = getattr(position, "market_value", 0.0)
+        if symbol in available and (quantity or market_value):
+            held.add(symbol)
+    return tuple(sorted(held))
+
+
 def _load_legacy_modules():
     from crypto_strategies.strategies.crypto_live_pool_rotation import core as legacy_core
     from crypto_strategies.strategies.crypto_live_pool_rotation import rotation as legacy_rotation
@@ -159,25 +180,24 @@ def evaluate_crypto_live_pool_rotation(ctx: StrategyContext) -> StrategyDecision
         weight_mode=str(config.get("weight_mode", "inverse_vol")),
     )
 
-    sell_reasons: dict[str, str] = {}
     atr_multiplier = float(config.get("atr_multiplier", 2.5))
-    for symbol in trend_universe_symbols:
-        curr_price = prices.get(symbol)
-        if curr_price is None:
-            continue
-        reason = legacy_rotation.get_trend_sell_reason(
-            working_state,
-            symbol,
-            curr_price,
-            indicators_map.get(symbol),
-            selected_candidates,
-            atr_multiplier,
-            get_symbol_trade_state_fn=get_symbol_trade_state_fn,
-            set_symbol_trade_state_fn=set_symbol_trade_state_fn,
-            translate_fn=translator,
-        )
-        if reason:
-            sell_reasons[symbol] = str(reason)
+    held_risk_symbols = _resolve_held_risk_symbols(
+        ctx,
+        working_state,
+        trend_universe_symbols,
+        get_symbol_trade_state_fn,
+    )
+    sell_reasons, stop_input_blocked = evaluate_held_trend_stops(
+        working_state,
+        held_symbols=held_risk_symbols,
+        prices=prices,
+        indicators_map=indicators_map,
+        selected_candidates=selected_candidates,
+        atr_multiplier=atr_multiplier,
+        get_symbol_trade_state_fn=get_symbol_trade_state_fn,
+        set_symbol_trade_state_fn=set_symbol_trade_state_fn,
+        translate_fn=translator,
+    )
 
     eligible_buy_symbols, planned_trend_buys = legacy_rotation.plan_trend_buys(
         working_state,
@@ -200,6 +220,8 @@ def evaluate_crypto_live_pool_rotation(ctx: StrategyContext) -> StrategyDecision
     ]
     trend_target_ratio = float(budgets["trend_target_ratio"])
     for symbol, payload in sorted(selected_candidates.items()):
+        if symbol in sell_reasons:
+            continue
         positions.append(
             PositionTarget(
                 symbol=symbol,
@@ -257,11 +279,41 @@ def evaluate_crypto_live_pool_rotation(ctx: StrategyContext) -> StrategyDecision
     }
     decision = StrategyDecision(
         positions=tuple(positions),
-        budgets=budget_intents,
-        risk_flags=risk_flags,
+        budgets=() if sell_reasons else budget_intents,
+        risk_flags=risk_flags + (("rejected:strategy_stop_input",) if stop_input_blocked else ()),
         diagnostics=diagnostics,
     )
+    if stop_input_blocked:
+        decision = StrategyDecision(
+            positions=(),
+            budgets=(),
+            risk_flags=decision.risk_flags,
+            diagnostics=decision.diagnostics,
+        )
     decision = apply_risk_gate(decision, ctx=ctx)
+    member_assessment = decision.diagnostics["member_risk_assessment"]
+    stop_outcome = "TRIGGERED" if sell_reasons else "CLEAR"
+    stop_action_result = "NOT_REQUIRED"
+    if stop_outcome == "TRIGGERED":
+        stop_action_result = (
+            "COMPLETED"
+            if member_assessment["outcome"] == "APPROVE" and not stop_input_blocked
+            else "BLOCKED"
+        )
+    decision = StrategyDecision(
+        positions=decision.positions,
+        budgets=decision.budgets,
+        risk_flags=decision.risk_flags,
+        diagnostics={
+            **dict(decision.diagnostics),
+            "strategy_stop_evaluation": build_strategy_stop_evaluation(
+                evaluated_at=member_assessment["evaluated_at"],
+                decision_digest_sha256=member_assessment["decision_digest_sha256"],
+                outcome=stop_outcome,
+                action_result=stop_action_result,
+            ),
+        },
+    )
     record_strategy_decision(
         ctx,
         decision,
@@ -350,7 +402,7 @@ def evaluate_crypto_btc_dca(ctx: StrategyContext) -> StrategyDecision:
         risk_flags=risk_flags,
         diagnostics=diagnostics,
     )
-    decision = apply_risk_gate(decision, ctx=ctx, max_single_weight=0.50)
+    decision = apply_risk_gate(decision, ctx=ctx)
     record_strategy_decision(
         ctx,
         decision,
@@ -440,7 +492,7 @@ def evaluate_crypto_trend_rotation(ctx: StrategyContext) -> StrategyDecision:
         risk_flags=risk_flags,
         diagnostics=diagnostics,
     )
-    decision = apply_risk_gate(decision, ctx=ctx, max_single_weight=0.30)
+    decision = apply_risk_gate(decision, ctx=ctx)
     record_strategy_decision(
         ctx,
         decision,
@@ -636,7 +688,7 @@ def evaluate_crypto_equity_combo(ctx: StrategyContext) -> StrategyDecision:
         risk_flags=risk_flags,
         diagnostics=diagnostics,
     )
-    decision = apply_risk_gate(decision, ctx=ctx, max_single_weight=0.30)
+    decision = apply_risk_gate(decision, ctx=ctx)
     record_strategy_decision(
         ctx,
         decision,
