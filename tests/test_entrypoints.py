@@ -448,6 +448,12 @@ class CryptoStrategyEntrypointTests(unittest.TestCase):
 
     def test_crypto_live_pool_rotation_missing_held_stop_input_is_no_order(self) -> None:
         entrypoint = get_strategy_entrypoint("crypto_live_pool_rotation")
+        buy_plan_calls: list[object] = []
+
+        def plan_trend_buys(*args, **kwargs):
+            buy_plan_calls.append((args, kwargs))
+            return [], {}
+
         fake_core = SimpleNamespace(
             compute_allocation_budgets=lambda *_args: {
                 "btc_target_ratio": 0.1,
@@ -463,7 +469,7 @@ class CryptoStrategyEntrypointTests(unittest.TestCase):
         )
         fake_rotation = SimpleNamespace(
             resolve_authoritative_rotation_pool=lambda *_args, **_kwargs: ["ETHUSDT"],
-            plan_trend_buys=lambda *_args, **_kwargs: ([], {}),
+            plan_trend_buys=plan_trend_buys,
         )
         def evaluate(prices, indicators):
             now = _fresh_as_of()
@@ -516,8 +522,16 @@ class CryptoStrategyEntrypointTests(unittest.TestCase):
                 {"ETHUSDT": 2000.0},
                 {"atr14": 100.0, "sma60": 2600.0},
             )
+            buy_plan_calls_after_valid_stop = len(buy_plan_calls)
+            invalid_atr = tuple(
+                evaluate(
+                    {"ETHUSDT": 3200.0},
+                    {"atr14": atr14, "sma60": 2600.0},
+                )
+                for atr14 in (0.0, -1.0)
+            )
 
-        for decision in (missing, triggered):
+        for decision in (missing, triggered, *invalid_atr):
             with self.subTest(decision=decision):
                 self.assertEqual(decision.positions, ())
                 self.assertEqual(decision.budgets, ())
@@ -529,7 +543,9 @@ class CryptoStrategyEntrypointTests(unittest.TestCase):
                     decision.diagnostics["strategy_stop_evaluation"]["action_result"],
                     "BLOCKED",
                 )
-        self.assertIn("rejected:strategy_stop_input", missing.risk_flags)
+        for decision in (missing, *invalid_atr):
+            self.assertIn("rejected:strategy_stop_input", decision.risk_flags)
+        self.assertEqual(len(buy_plan_calls), buy_plan_calls_after_valid_stop)
 
     def test_crypto_live_pool_rotation_blocked_stop_skips_buy_planning(self) -> None:
         entrypoint = get_strategy_entrypoint("crypto_live_pool_rotation")

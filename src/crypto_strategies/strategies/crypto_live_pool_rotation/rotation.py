@@ -54,6 +54,7 @@ def evaluate_held_trend_stops(
             or valid_atr_multiplier <= 0.0
             or curr_price is None
             or atr is None
+            or atr <= 0.0
             or sma60 is None
             or entry_price is None
             or entry_price <= 0.0
