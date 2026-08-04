@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import logging
+import math
 from collections.abc import Mapping
+from dataclasses import asdict
 from typing import Any
 
-from quant_platform_kit.risk.gate import apply_risk_gate as _qpk_apply_risk_gate
+from quant_platform_kit.risk.gate import assess_with_evidence as _qpk_assess_with_evidence
 from quant_platform_kit.risk.gate import enrich_decision_risk_diagnostics
 from quant_platform_kit.risk.portfolio_diagnostics import extract_portfolio_risk_diagnostics
-from quant_platform_kit.strategy_contracts import PositionTarget, StrategyContext, StrategyDecision
+from quant_platform_kit.strategy_contracts import StrategyContext, StrategyDecision
 from quant_platform_kit.strategy_lifecycle.performance_monitor import PerformanceMonitor
 
 logger = logging.getLogger(__name__)
@@ -49,16 +51,16 @@ def apply_risk_gate(
     decision: StrategyDecision,
     *,
     ctx: StrategyContext | None = None,
-    max_single_weight: float = 1.0,
-    max_positions: int = 20,
-    max_total_exposure: float = 1.0,
+    max_single_weight: float | None = None,
     portfolio_snapshot: Any | None = None,
     market_data: Mapping[str, Any] | None = None,
 ) -> StrategyDecision:
-    """QPK unified risk gate: stop-loss, circuit breaker, concentration (task 8)."""
-    snapshot = portfolio_snapshot if portfolio_snapshot is not None else (
-        ctx.portfolio if ctx is not None else None
-    )
+    """Run the QPK MEMBER gate and propagate only its redacted assessment."""
+    snapshot = portfolio_snapshot
+    if snapshot is None and ctx is not None:
+        snapshot = ctx.portfolio
+        if snapshot is None:
+            snapshot = ctx.market_data.get("portfolio_snapshot")
     if snapshot is not None:
         portfolio_diag = extract_portfolio_risk_diagnostics(snapshot)
         decision = enrich_decision_risk_diagnostics(
@@ -68,11 +70,63 @@ def apply_risk_gate(
         )
     if market_data is None and ctx is not None:
         market_data = dict(ctx.market_data or {})
-    return _qpk_apply_risk_gate(
+    mandate_provenance = None if ctx is None else ctx.artifacts.get("mandate_provenance")
+    if not isinstance(mandate_provenance, Mapping):
+        mandate_provenance = {}
+    result = _qpk_assess_with_evidence(
         decision,
-        max_single_weight=max_single_weight,
-        max_positions=max_positions,
-        max_total_exposure=max_total_exposure,
-        portfolio_snapshot=snapshot,
-        market_data=market_data,
+        snapshot,
+        scope="MEMBER",
+        mandate_provenance=mandate_provenance,
+        market_data=market_data or {},
+    )
+    risk_flags = tuple(
+        dict.fromkeys(tuple(decision.risk_flags or ()) + tuple(result.decision.risk_flags or ()))
+    )
+    strategy_weights = []
+    strategy_weight_invalid = False
+    for position in result.decision.positions:
+        try:
+            weight = float(position.target_weight)
+        except (TypeError, ValueError):
+            strategy_weight_invalid = True
+            break
+        if not math.isfinite(weight):
+            strategy_weight_invalid = True
+            break
+        strategy_weights.append(abs(weight))
+    strategy_concentration_rejected = False
+    if max_single_weight is not None:
+        cap = float(max_single_weight)
+        if not math.isfinite(cap) or not 0.0 <= cap <= 1.0:
+            raise ValueError("max_single_weight must be finite and between 0 and 1")
+        strategy_concentration_rejected = strategy_weight_invalid or any(
+            weight > cap for weight in strategy_weights
+        )
+    if strategy_concentration_rejected:
+        risk_flags = tuple(dict.fromkeys(risk_flags + ("rejected:strategy_concentration",)))
+    strategy_position_count_rejected = len(result.decision.positions) > 20
+    if strategy_position_count_rejected:
+        risk_flags = tuple(dict.fromkeys(risk_flags + ("rejected:too_many_positions",)))
+    total_exposure = sum(strategy_weights)
+    strategy_total_exposure_rejected = (
+        strategy_weight_invalid
+        or not math.isfinite(total_exposure)
+        or total_exposure > 1.0 + 1e-9
+    )
+    if strategy_total_exposure_rejected:
+        risk_flags = tuple(dict.fromkeys(risk_flags + ("rejected:overexposed",)))
+    strategy_rejected = (
+        strategy_concentration_rejected
+        or strategy_position_count_rejected
+        or strategy_total_exposure_rejected
+    )
+    return StrategyDecision(
+        positions=() if strategy_rejected else result.decision.positions,
+        budgets=() if strategy_rejected else result.decision.budgets,
+        risk_flags=risk_flags,
+        diagnostics={
+            **dict(result.decision.diagnostics or {}),
+            "member_risk_assessment": asdict(result.assessment),
+        },
     )

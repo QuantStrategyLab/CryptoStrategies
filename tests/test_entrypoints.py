@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
@@ -7,6 +8,32 @@ from unittest.mock import patch
 from quant_platform_kit import PortfolioSnapshot, Position
 from quant_platform_kit.strategy_contracts import StrategyContext
 from crypto_strategies import get_strategy_entrypoint
+
+
+def _synthetic_member_mandate(*symbols: str) -> dict[str, object]:
+    now = datetime.now(timezone.utc)
+    return {
+        "mandate_id": "synthetic_algorithm_equivalence_only",
+        "mandate_version": "test-v1",
+        "authority_receipt_sha256": "a" * 64,
+        "authority_scope": "RESEARCH_ONLY",
+        "strategy_profile": "synthetic_test_fixture",
+        "account_mode": "synthetic_test_fixture",
+        "effective_at": (now - timedelta(minutes=1)).isoformat().replace("+00:00", "Z"),
+        "expires_at": (now + timedelta(minutes=1)).isoformat().replace("+00:00", "Z"),
+        "max_snapshot_age_seconds": 300,
+        "effective_exposure_cap": 1.0,
+        "loss_budget": 1_000_000.0,
+        "product_caps": {symbol: 1.0 for symbol in symbols},
+        "nominal_caps": {symbol: 1.0 for symbol in symbols},
+        "product_leverage_factors": {symbol: 1 for symbol in symbols},
+        "allowed_nonzero_assets": list(symbols),
+        "source_revision": "b371322b948e4298920a7d8613b155245dcd5f8d",
+    }
+
+
+def _fresh_as_of() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 class CryptoStrategyEntrypointTests(unittest.TestCase):
@@ -184,6 +211,8 @@ class CryptoStrategyEntrypointTests(unittest.TestCase):
         state = {
             "trend_pool_version": "2026-03-15-core_major",
             "trend_pool_as_of_date": "2026-03-15",
+            "ETHUSDT": {"is_holding": True, "entry_price": 2500.0, "highest_price": 3000.0},
+            "SOLUSDT": {"is_holding": True, "entry_price": 150.0, "highest_price": 180.0},
         }
         upstream_pool = ["BNBUSDT", "ETHUSDT", "SOLUSDT"]
         expected_budgets = legacy_core.compute_allocation_budgets(
@@ -229,7 +258,7 @@ class CryptoStrategyEntrypointTests(unittest.TestCase):
                     "derived_indicators": trend_indicators,
                     "benchmark_snapshot": btc_snapshot,
                     "portfolio_snapshot": PortfolioSnapshot(
-                        as_of="2026-04-06",
+                        as_of=_fresh_as_of(),
                         total_equity=account_metrics["total_equity"],
                         buying_power=account_metrics["cash_usdt"],
                         cash_balance=account_metrics["cash_usdt"],
@@ -241,15 +270,26 @@ class CryptoStrategyEntrypointTests(unittest.TestCase):
                         metadata={
                             "account_metrics": account_metrics,
                             "cash_available_for_trading": account_metrics["cash_usdt"],
+                            "observed_effective_exposure": 0.27,
                         },
                     ),
                     "universe_snapshot": upstream_pool,
                 },
                 state=state,
-                artifacts={"trend_pool_contract": {"source": "explicit_artifact"}},
+                artifacts={
+                    "trend_pool_contract": {"source": "explicit_artifact"},
+                    "mandate_provenance": _synthetic_member_mandate(
+                        "BTCUSDT", "BNBUSDT", "ETHUSDT", "SOLUSDT"
+                    ),
+                },
             )
         )
 
+        self.assertEqual(
+            decision.diagnostics["member_risk_assessment"]["outcome"],
+            "APPROVE",
+            decision.diagnostics["member_risk_assessment"],
+        )
         budget_map = {budget.name: budget.amount for budget in decision.budgets}
         self.assertAlmostEqual(budget_map["btc_core_dca_pool"], expected_budgets["dca_usdt_pool"])
         self.assertAlmostEqual(budget_map["trend_rotation_pool"], expected_budgets["trend_usdt_pool"])
@@ -273,6 +313,11 @@ class CryptoStrategyEntrypointTests(unittest.TestCase):
         self.assertEqual(tuple(decision.diagnostics["eligible_buy_symbols"]), tuple(expected_eligible_buy_symbols))
         self.assertEqual(decision.diagnostics["planned_trend_buys"], expected_planned_trend_buys)
         self.assertEqual(decision.diagnostics["sell_reasons"], {})
+        self.assertEqual(decision.diagnostics["strategy_stop_evaluation"]["outcome"], "CLEAR")
+        self.assertEqual(
+            decision.diagnostics["strategy_stop_evaluation"]["decision_digest_sha256"],
+            decision.diagnostics["member_risk_assessment"]["decision_digest_sha256"],
+        )
         self.assertAlmostEqual(
             decision.diagnostics["btc_base_order_usdt"],
             legacy_core.get_dynamic_btc_base_order(account_metrics["total_equity"]),
@@ -323,7 +368,7 @@ class CryptoStrategyEntrypointTests(unittest.TestCase):
                     },
                     "benchmark_snapshot": {"regime_on": True},
                     "portfolio_snapshot": PortfolioSnapshot(
-                        as_of="2026-04-06",
+                        as_of=_fresh_as_of(),
                         total_equity=1000.0,
                         buying_power=1000.0,
                         cash_balance=1000.0,
@@ -334,17 +379,28 @@ class CryptoStrategyEntrypointTests(unittest.TestCase):
                                 "trend_value": 0.0,
                                 "dca_value": 0.0,
                             },
+                            "observed_effective_exposure": 0.0,
                         },
                     ),
                     "universe_snapshot": ("ETHUSDT", "SOLUSDT"),
                 },
                 state={},
+                artifacts={
+                    "mandate_provenance": _synthetic_member_mandate(
+                        "BTCUSDT", "ETHUSDT", "SOLUSDT"
+                    )
+                },
             )
         )
 
-        budget_map = {budget.name: budget.amount for budget in decision.budgets}
-        self.assertGreater(budget_map["trend_rotation_pool"], 0.0)
-        self.assertGreater(budget_map["btc_core_dca_pool"], 0.0)
+        self.assertEqual(
+            decision.diagnostics["member_risk_assessment"]["outcome"],
+            "APPROVE",
+            decision.diagnostics["member_risk_assessment"],
+        )
+        self.assertEqual(decision.positions, ())
+        self.assertEqual(decision.budgets, ())
+        self.assertIn("rejected:strategy_concentration", decision.risk_flags)
         self.assertGreater(decision.diagnostics["btc_base_order_usdt"], 0.0)
         self.assertGreater(decision.diagnostics["btc_target_ratio"], 0.0)
         self.assertGreater(decision.diagnostics["trend_target_ratio"], 0.0)
@@ -386,6 +442,183 @@ class CryptoStrategyEntrypointTests(unittest.TestCase):
 
         self.assertIn("regime_off", decision.risk_flags)
         self.assertIn("no_trend_candidates", decision.risk_flags)
+        self.assertEqual(decision.positions, ())
+        self.assertEqual(decision.budgets, ())
+        self.assertEqual(decision.diagnostics["member_risk_assessment"]["outcome"], "REJECT")
+
+    def test_crypto_live_pool_rotation_missing_held_stop_input_is_no_order(self) -> None:
+        entrypoint = get_strategy_entrypoint("crypto_live_pool_rotation")
+        fake_core = SimpleNamespace(
+            compute_allocation_budgets=lambda *_args: {
+                "btc_target_ratio": 0.1,
+                "trend_target_ratio": 0.1,
+                "trend_usdt_pool": 10.0,
+                "dca_usdt_pool": 10.0,
+            },
+            select_rotation_weights=lambda *_args, **_kwargs: {
+                "ETHUSDT": {"weight": 1.0, "relative_score": 1.0, "abs_momentum": 0.1}
+            },
+            get_dynamic_btc_base_order=lambda _total_equity: 1.0,
+            allocate_trend_buy_budget=lambda *_args, **_kwargs: {},
+        )
+        fake_rotation = SimpleNamespace(
+            resolve_authoritative_rotation_pool=lambda *_args, **_kwargs: ["ETHUSDT"],
+            plan_trend_buys=lambda *_args, **_kwargs: ([], {}),
+        )
+        def evaluate(prices, indicators):
+            now = _fresh_as_of()
+            return entrypoint.evaluate(
+                StrategyContext(
+                    as_of=now,
+                    market_data={
+                        "market_prices": prices,
+                        "derived_indicators": {"ETHUSDT": indicators},
+                        "benchmark_snapshot": {"regime_on": True},
+                        "portfolio_snapshot": PortfolioSnapshot(
+                            as_of=now,
+                            total_equity=1000.0,
+                            positions=(
+                                Position(symbol="ETHUSDT", quantity=1.0, market_value=3000.0),
+                            ),
+                            metadata={
+                                "account_metrics": {
+                                    "total_equity": 1000.0,
+                                    "cash_usdt": 1000.0,
+                                    "trend_value": 0.0,
+                                    "dca_value": 0.0,
+                                },
+                                "observed_effective_exposure": 0.0,
+                            },
+                        ),
+                        "universe_snapshot": (),
+                    },
+                    state={
+                        "ETHUSDT": {
+                            "is_holding": True,
+                            "entry_price": 2800.0,
+                            "highest_price": 3200.0,
+                        }
+                    },
+                    artifacts={
+                        "mandate_provenance": _synthetic_member_mandate(
+                            "BTCUSDT", "ETHUSDT"
+                        )
+                    },
+                )
+            )
+
+        with patch(
+            "crypto_strategies.entrypoints._load_legacy_modules",
+            return_value=(fake_core, fake_rotation),
+        ):
+            missing = evaluate({}, {"sma60": 2600.0})
+            triggered = evaluate(
+                {"ETHUSDT": 2000.0},
+                {"atr14": 100.0, "sma60": 2600.0},
+            )
+
+        for decision in (missing, triggered):
+            with self.subTest(decision=decision):
+                self.assertEqual(decision.positions, ())
+                self.assertEqual(decision.budgets, ())
+                self.assertEqual(
+                    decision.diagnostics["strategy_stop_evaluation"]["outcome"],
+                    "TRIGGERED",
+                )
+                self.assertEqual(
+                    decision.diagnostics["strategy_stop_evaluation"]["action_result"],
+                    "BLOCKED",
+                )
+        self.assertIn("rejected:strategy_stop_input", missing.risk_flags)
+
+    def test_crypto_live_pool_rotation_invalid_held_highest_price_is_no_order(self) -> None:
+        entrypoint = get_strategy_entrypoint("crypto_live_pool_rotation")
+        fake_core = SimpleNamespace(
+            compute_allocation_budgets=lambda *_args: {
+                "btc_target_ratio": 0.1,
+                "trend_target_ratio": 0.1,
+                "trend_usdt_pool": 10.0,
+                "dca_usdt_pool": 10.0,
+            },
+            select_rotation_weights=lambda *_args, **_kwargs: {
+                "ETHUSDT": {"weight": 1.0, "relative_score": 1.0, "abs_momentum": 0.1}
+            },
+            get_dynamic_btc_base_order=lambda _total_equity: 1.0,
+            allocate_trend_buy_budget=lambda *_args, **_kwargs: {},
+        )
+        fake_rotation = SimpleNamespace(
+            resolve_authoritative_rotation_pool=lambda *_args, **_kwargs: ["ETHUSDT"],
+            plan_trend_buys=lambda *_args, **_kwargs: ([], {}),
+        )
+        missing = object()
+
+        def evaluate(highest_price):
+            now = _fresh_as_of()
+            symbol_state = {"is_holding": True, "entry_price": 2800.0}
+            if highest_price is not missing:
+                symbol_state["highest_price"] = highest_price
+            return entrypoint.evaluate(
+                StrategyContext(
+                    as_of=now,
+                    market_data={
+                        "market_prices": {"ETHUSDT": 3000.0},
+                        "derived_indicators": {
+                            "ETHUSDT": {"atr14": 100.0, "sma60": 2600.0}
+                        },
+                        "benchmark_snapshot": {"regime_on": True},
+                        "portfolio_snapshot": PortfolioSnapshot(
+                            as_of=now,
+                            total_equity=1000.0,
+                            positions=(
+                                Position(symbol="ETHUSDT", quantity=1.0, market_value=3000.0),
+                            ),
+                            metadata={
+                                "account_metrics": {
+                                    "total_equity": 1000.0,
+                                    "cash_usdt": 1000.0,
+                                    "trend_value": 0.0,
+                                    "dca_value": 0.0,
+                                },
+                                "observed_effective_exposure": 0.0,
+                            },
+                        ),
+                        "universe_snapshot": (),
+                    },
+                    state={"ETHUSDT": symbol_state},
+                    artifacts={
+                        "mandate_provenance": _synthetic_member_mandate(
+                            "BTCUSDT", "ETHUSDT"
+                        )
+                    },
+                )
+            )
+
+        with patch(
+            "crypto_strategies.entrypoints._load_legacy_modules",
+            return_value=(fake_core, fake_rotation),
+        ):
+            for highest_price in (
+                missing,
+                None,
+                float("nan"),
+                float("inf"),
+                0.0,
+                -1.0,
+                2700.0,
+            ):
+                with self.subTest(highest_price=highest_price):
+                    decision = evaluate(highest_price)
+                    self.assertEqual(decision.positions, ())
+                    self.assertEqual(decision.budgets, ())
+                    self.assertIn("rejected:strategy_stop_input", decision.risk_flags)
+                    self.assertEqual(
+                        decision.diagnostics["strategy_stop_evaluation"]["outcome"],
+                        "TRIGGERED",
+                    )
+                    self.assertEqual(
+                        decision.diagnostics["strategy_stop_evaluation"]["action_result"],
+                        "BLOCKED",
+                    )
 
 
 if __name__ == "__main__":
