@@ -98,9 +98,13 @@ def apply_risk_gate(
         )
     if strategy_concentration_rejected:
         risk_flags = tuple(dict.fromkeys(risk_flags + ("rejected:strategy_concentration",)))
+    strategy_position_count_rejected = len(result.decision.positions) > 20
+    if strategy_position_count_rejected:
+        risk_flags = tuple(dict.fromkeys(risk_flags + ("rejected:too_many_positions",)))
+    strategy_rejected = strategy_concentration_rejected or strategy_position_count_rejected
     return StrategyDecision(
-        positions=() if strategy_concentration_rejected else result.decision.positions,
-        budgets=() if strategy_concentration_rejected else result.decision.budgets,
+        positions=() if strategy_rejected else result.decision.positions,
+        budgets=() if strategy_rejected else result.decision.budgets,
         risk_flags=risk_flags,
         diagnostics={
             **dict(result.decision.diagnostics or {}),

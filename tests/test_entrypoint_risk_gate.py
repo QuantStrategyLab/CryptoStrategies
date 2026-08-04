@@ -115,3 +115,43 @@ def test_apply_risk_gate_preserves_stricter_strategy_concentration_cap() -> None
     assert result.positions == ()
     assert result.budgets == ()
     assert "rejected:strategy_concentration" in result.risk_flags
+
+
+def test_apply_risk_gate_preserves_hard_position_count_limit() -> None:
+    now = datetime.now(timezone.utc)
+    symbols = [f"ASSET{index}USDT" for index in range(21)]
+    mandate = _zero_cap_mandate(now)
+    mandate.update(
+        {
+            "mandate_id": "synthetic_algorithm_equivalence_only",
+            "effective_exposure_cap": 1.0,
+            "loss_budget": 1000.0,
+            "product_caps": {symbol: 1.0 for symbol in symbols},
+            "nominal_caps": {symbol: 1.0 for symbol in symbols},
+            "product_leverage_factors": {symbol: 1 for symbol in symbols},
+            "allowed_nonzero_assets": symbols,
+        }
+    )
+    snapshot = PortfolioSnapshot(
+        as_of=now,
+        total_equity=1000.0,
+        metadata={"observed_effective_exposure": 0.0},
+    )
+    ctx = StrategyContext(
+        as_of=now,
+        portfolio=snapshot,
+        artifacts={"mandate_provenance": mandate},
+    )
+    decision = StrategyDecision(
+        positions=tuple(
+            PositionTarget(symbol=symbol, target_weight=0.04) for symbol in symbols
+        ),
+        budgets=(BudgetIntent(name="portfolio", amount=1.0),),
+    )
+
+    result = apply_risk_gate(decision, ctx=ctx)
+
+    assert result.diagnostics["member_risk_assessment"]["outcome"] == "APPROVE"
+    assert result.positions == ()
+    assert result.budgets == ()
+    assert "rejected:too_many_positions" in result.risk_flags
