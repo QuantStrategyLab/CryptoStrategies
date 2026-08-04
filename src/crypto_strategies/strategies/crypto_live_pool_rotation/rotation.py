@@ -33,22 +33,25 @@ def evaluate_held_trend_stops(
     """Evaluate every held risk symbol; incomplete inputs block CLEAR."""
     sell_reasons = {}
     input_blocked = False
+    valid_atr_multiplier = _finite_number(atr_multiplier)
     for symbol in _normalize_symbol_list(held_symbols):
         symbol_state = get_symbol_trade_state_fn(state, symbol)
-        persisted_symbol_state = state.get(symbol) if isinstance(state, Mapping) else None
+        if not isinstance(symbol_state, Mapping):
+            symbol_state = {}
         indicators = indicators_map.get(symbol)
         curr_price = _finite_number(prices.get(symbol))
         atr = _finite_number(indicators.get("atr14")) if isinstance(indicators, Mapping) else None
         sma60 = _finite_number(indicators.get("sma60")) if isinstance(indicators, Mapping) else None
         entry_price = _finite_number(symbol_state.get("entry_price"))
         highest_price = (
-            _finite_number(persisted_symbol_state.get("highest_price"))
-            if isinstance(persisted_symbol_state, Mapping)
-            and "highest_price" in persisted_symbol_state
+            _finite_number(symbol_state.get("highest_price"))
+            if "highest_price" in symbol_state
             else None
         )
         if (
             not symbol_state.get("is_holding")
+            or valid_atr_multiplier is None
+            or valid_atr_multiplier <= 0.0
             or curr_price is None
             or atr is None
             or sma60 is None
@@ -67,7 +70,7 @@ def evaluate_held_trend_stops(
             curr_price,
             indicators,
             selected_candidates,
-            atr_multiplier,
+            valid_atr_multiplier,
             get_symbol_trade_state_fn=get_symbol_trade_state_fn,
             set_symbol_trade_state_fn=set_symbol_trade_state_fn,
             translate_fn=translate_fn,

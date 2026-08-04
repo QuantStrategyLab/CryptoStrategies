@@ -121,7 +121,13 @@ def _resolve_state_helpers(config: Mapping[str, object]):
     return _get_symbol_trade_state, _set_symbol_trade_state
 
 
-def _resolve_held_risk_symbols(ctx: StrategyContext, state):
+def _resolve_held_risk_symbols(
+    ctx: StrategyContext,
+    state,
+    *,
+    trend_universe_symbols,
+    get_symbol_trade_state_fn,
+):
     held = {
         str(symbol).strip().upper()
         for symbol, payload in state.items()
@@ -130,8 +136,15 @@ def _resolve_held_risk_symbols(ctx: StrategyContext, state):
         and str(symbol).strip().upper() != "BTCUSDT"
     }
     snapshot = _resolve_portfolio_snapshot(ctx)
+    candidate_symbols = {
+        str(symbol).strip().upper()
+        for symbol in trend_universe_symbols
+        if str(symbol).strip().upper() != "BTCUSDT"
+    }
     for position in getattr(snapshot, "positions", ()) or ():
         symbol = str(getattr(position, "symbol", "")).strip().upper()
+        if symbol and symbol != "BTCUSDT":
+            candidate_symbols.add(symbol)
         quantity = getattr(position, "quantity", 0.0)
         market_value = getattr(position, "market_value", 0.0)
         values = (quantity, market_value)
@@ -142,6 +155,10 @@ def _resolve_held_risk_symbols(ctx: StrategyContext, state):
             and float(value) != 0.0
             for value in values
         ):
+            held.add(symbol)
+    for symbol in candidate_symbols:
+        symbol_state = get_symbol_trade_state_fn(state, symbol)
+        if isinstance(symbol_state, Mapping) and symbol_state.get("is_holding"):
             held.add(symbol)
     return tuple(sorted(held))
 
@@ -189,10 +206,12 @@ def evaluate_crypto_live_pool_rotation(ctx: StrategyContext) -> StrategyDecision
         weight_mode=str(config.get("weight_mode", "inverse_vol")),
     )
 
-    atr_multiplier = float(config.get("atr_multiplier", 2.5))
+    atr_multiplier = config.get("atr_multiplier", 2.5)
     held_risk_symbols = _resolve_held_risk_symbols(
         ctx,
         working_state,
+        trend_universe_symbols=trend_universe_symbols,
+        get_symbol_trade_state_fn=get_symbol_trade_state_fn,
     )
     sell_reasons, stop_input_blocked = evaluate_held_trend_stops(
         working_state,
@@ -206,50 +225,56 @@ def evaluate_crypto_live_pool_rotation(ctx: StrategyContext) -> StrategyDecision
         translate_fn=translator,
     )
 
-    eligible_buy_symbols, planned_trend_buys = legacy_rotation.plan_trend_buys(
-        working_state,
-        runtime_trend_universe={symbol: {"base_asset": symbol[:-4]} for symbol in trend_universe_symbols},
-        selected_candidates=selected_candidates,
-        trend_indicators=indicators_map,
-        prices=prices,
-        available_trend_buy_budget=float(budgets["trend_usdt_pool"]),
-        allow_new_trend_entries=bool(config.get("allow_new_trend_entries", True)),
-        get_symbol_trade_state_fn=get_symbol_trade_state_fn,
-        allocate_trend_buy_budget_fn=legacy_core.allocate_trend_buy_budget,
-    )
-
-    positions = [
-        PositionTarget(
-            symbol="BTCUSDT",
-            target_weight=float(budgets["btc_target_ratio"]),
-            role="core",
+    if stop_input_blocked:
+        eligible_buy_symbols, planned_trend_buys = (), {}
+        positions = []
+        budget_intents = ()
+    else:
+        eligible_buy_symbols, planned_trend_buys = legacy_rotation.plan_trend_buys(
+            working_state,
+            runtime_trend_universe={
+                symbol: {"base_asset": symbol[:-4]} for symbol in trend_universe_symbols
+            },
+            selected_candidates=selected_candidates,
+            trend_indicators=indicators_map,
+            prices=prices,
+            available_trend_buy_budget=float(budgets["trend_usdt_pool"]),
+            allow_new_trend_entries=bool(config.get("allow_new_trend_entries", True)),
+            get_symbol_trade_state_fn=get_symbol_trade_state_fn,
+            allocate_trend_buy_budget_fn=legacy_core.allocate_trend_buy_budget,
         )
-    ]
-    trend_target_ratio = float(budgets["trend_target_ratio"])
-    for symbol, payload in sorted(selected_candidates.items()):
-        if symbol in sell_reasons:
-            continue
-        positions.append(
+        positions = [
             PositionTarget(
-                symbol=symbol,
-                target_weight=trend_target_ratio * float(payload["weight"]),
-                role="trend_rotation",
+                symbol="BTCUSDT",
+                target_weight=float(budgets["btc_target_ratio"]),
+                role="core",
             )
-        )
+        ]
+        trend_target_ratio = float(budgets["trend_target_ratio"])
+        for symbol, payload in sorted(selected_candidates.items()):
+            if symbol in sell_reasons:
+                continue
+            positions.append(
+                PositionTarget(
+                    symbol=symbol,
+                    target_weight=trend_target_ratio * float(payload["weight"]),
+                    role="trend_rotation",
+                )
+            )
 
-    budget_intents = (
-        BudgetIntent(
-            name="btc_core_dca_pool",
-            symbol="BTCUSDT",
-            amount=float(budgets["dca_usdt_pool"]),
-            purpose="btc_core_accumulation",
-        ),
-        BudgetIntent(
-            name="trend_rotation_pool",
-            amount=float(budgets["trend_usdt_pool"]),
-            purpose="trend_rotation",
-        ),
-    )
+        budget_intents = (
+            BudgetIntent(
+                name="btc_core_dca_pool",
+                symbol="BTCUSDT",
+                amount=float(budgets["dca_usdt_pool"]),
+                purpose="btc_core_accumulation",
+            ),
+            BudgetIntent(
+                name="trend_rotation_pool",
+                amount=float(budgets["trend_usdt_pool"]),
+                purpose="trend_rotation",
+            ),
+        )
 
     risk_flags: tuple[str, ...] = ()
     if not btc_snapshot.get("regime_on"):

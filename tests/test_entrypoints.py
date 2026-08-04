@@ -531,6 +531,183 @@ class CryptoStrategyEntrypointTests(unittest.TestCase):
                 )
         self.assertIn("rejected:strategy_stop_input", missing.risk_flags)
 
+    def test_crypto_live_pool_rotation_blocked_stop_skips_buy_planning(self) -> None:
+        entrypoint = get_strategy_entrypoint("crypto_live_pool_rotation")
+        buy_plan_calls: list[object] = []
+
+        def plan_trend_buys(*args, **kwargs):
+            buy_plan_calls.append((args, kwargs))
+            raise AssertionError("buy planning must not run after blocked stop input")
+
+        fake_core = SimpleNamespace(
+            compute_allocation_budgets=lambda *_args: {
+                "btc_target_ratio": 0.1,
+                "trend_target_ratio": 0.1,
+                "trend_usdt_pool": 10.0,
+                "dca_usdt_pool": 10.0,
+            },
+            select_rotation_weights=lambda *_args, **_kwargs: {
+                "ETHUSDT": {"weight": 1.0, "relative_score": 1.0, "abs_momentum": 0.1}
+            },
+            get_dynamic_btc_base_order=lambda _total_equity: 1.0,
+            allocate_trend_buy_budget=lambda *_args, **_kwargs: {},
+        )
+        fake_rotation = SimpleNamespace(
+            resolve_authoritative_rotation_pool=lambda *_args, **_kwargs: ["ETHUSDT"],
+            plan_trend_buys=plan_trend_buys,
+        )
+        now = _fresh_as_of()
+
+        with patch(
+            "crypto_strategies.entrypoints._load_legacy_modules",
+            return_value=(fake_core, fake_rotation),
+        ):
+            decision = entrypoint.evaluate(
+                StrategyContext(
+                    as_of=now,
+                    market_data={
+                        "market_prices": {},
+                        "derived_indicators": {
+                            "ETHUSDT": {"atr14": 100.0, "sma60": 2600.0}
+                        },
+                        "benchmark_snapshot": {"regime_on": True},
+                        "portfolio_snapshot": PortfolioSnapshot(
+                            as_of=now,
+                            total_equity=1000.0,
+                            positions=(
+                                Position(symbol="ETHUSDT", quantity=1.0, market_value=3000.0),
+                            ),
+                            metadata={
+                                "account_metrics": {
+                                    "total_equity": 1000.0,
+                                    "cash_usdt": 1000.0,
+                                    "trend_value": 0.0,
+                                    "dca_value": 0.0,
+                                },
+                                "observed_effective_exposure": 0.0,
+                            },
+                        ),
+                        "universe_snapshot": ("ETHUSDT",),
+                    },
+                    state={},
+                    artifacts={
+                        "mandate_provenance": _synthetic_member_mandate(
+                            "BTCUSDT", "ETHUSDT"
+                        )
+                    },
+                )
+            )
+
+        self.assertEqual(buy_plan_calls, [])
+        self.assertEqual(decision.positions, ())
+        self.assertEqual(decision.budgets, ())
+        self.assertIn("rejected:strategy_stop_input", decision.risk_flags)
+        self.assertEqual(decision.diagnostics["eligible_buy_symbols"], ())
+        self.assertEqual(decision.diagnostics["planned_trend_buys"], {})
+        self.assertEqual(
+            decision.diagnostics["strategy_stop_evaluation"]["outcome"],
+            "TRIGGERED",
+        )
+        self.assertEqual(
+            decision.diagnostics["strategy_stop_evaluation"]["action_result"],
+            "BLOCKED",
+        )
+
+    def test_crypto_live_pool_rotation_discovers_nested_custom_held_state(self) -> None:
+        entrypoint = get_strategy_entrypoint("crypto_live_pool_rotation")
+        state_get_calls: list[str] = []
+
+        def get_symbol_trade_state(state, symbol):
+            state_get_calls.append(symbol)
+            symbol_state = state.get("trade_states", {}).get(symbol)
+            if not isinstance(symbol_state, dict):
+                return {"is_holding": False, "entry_price": 0.0, "highest_price": 0.0}
+            return dict(symbol_state)
+
+        def set_symbol_trade_state(state, symbol, symbol_state):
+            state.setdefault("trade_states", {})[symbol] = dict(symbol_state)
+
+        fake_core = SimpleNamespace(
+            compute_allocation_budgets=lambda *_args: {
+                "btc_target_ratio": 0.1,
+                "trend_target_ratio": 0.1,
+                "trend_usdt_pool": 10.0,
+                "dca_usdt_pool": 10.0,
+            },
+            select_rotation_weights=lambda *_args, **_kwargs: {
+                "ETHUSDT": {"weight": 1.0, "relative_score": 1.0, "abs_momentum": 0.1}
+            },
+            get_dynamic_btc_base_order=lambda _total_equity: 1.0,
+            allocate_trend_buy_budget=lambda *_args, **_kwargs: {},
+        )
+        fake_rotation = SimpleNamespace(
+            resolve_authoritative_rotation_pool=lambda *_args, **_kwargs: ["ETHUSDT"],
+            plan_trend_buys=lambda *_args, **_kwargs: ([], {}),
+        )
+        now = _fresh_as_of()
+
+        with patch(
+            "crypto_strategies.entrypoints._load_legacy_modules",
+            return_value=(fake_core, fake_rotation),
+        ):
+            decision = entrypoint.evaluate(
+                StrategyContext(
+                    as_of=now,
+                    market_data={
+                        "market_prices": {"ETHUSDT": 3000.0},
+                        "derived_indicators": {
+                            "ETHUSDT": {"atr14": 100.0, "sma60": 2600.0}
+                        },
+                        "benchmark_snapshot": {"regime_on": True},
+                        "portfolio_snapshot": PortfolioSnapshot(
+                            as_of=now,
+                            total_equity=1000.0,
+                            metadata={
+                                "account_metrics": {
+                                    "total_equity": 1000.0,
+                                    "cash_usdt": 1000.0,
+                                    "trend_value": 0.0,
+                                    "dca_value": 0.0,
+                                },
+                                "observed_effective_exposure": 0.0,
+                            },
+                        ),
+                        "universe_snapshot": ("ETHUSDT",),
+                    },
+                    state={
+                        "trade_states": {
+                            "ETHUSDT": {
+                                "is_holding": True,
+                                "entry_price": 2800.0,
+                            }
+                        }
+                    },
+                    runtime_config={
+                        "get_symbol_trade_state_fn": get_symbol_trade_state,
+                        "set_symbol_trade_state_fn": set_symbol_trade_state,
+                    },
+                    artifacts={
+                        "mandate_provenance": _synthetic_member_mandate(
+                            "BTCUSDT", "ETHUSDT"
+                        )
+                    },
+                )
+            )
+
+        self.assertGreaterEqual(state_get_calls.count("ETHUSDT"), 2)
+        self.assertEqual(decision.positions, ())
+        self.assertEqual(decision.budgets, ())
+        self.assertIn("rejected:strategy_stop_input", decision.risk_flags)
+        self.assertIn("ETHUSDT", decision.diagnostics["sell_reasons"])
+        self.assertEqual(
+            decision.diagnostics["strategy_stop_evaluation"]["outcome"],
+            "TRIGGERED",
+        )
+        self.assertEqual(
+            decision.diagnostics["strategy_stop_evaluation"]["action_result"],
+            "BLOCKED",
+        )
+
     def test_crypto_live_pool_rotation_invalid_held_highest_price_is_no_order(self) -> None:
         entrypoint = get_strategy_entrypoint("crypto_live_pool_rotation")
         fake_core = SimpleNamespace(

@@ -40,6 +40,70 @@ class RotationAuthorityTests(unittest.TestCase):
                 self.assertTrue(input_blocked)
                 self.assertEqual(reasons, {"ETHUSDT": "trend_sell_reason_missing_stop_input"})
 
+    def test_invalid_atr_multiplier_blocks_stop_clear(self) -> None:
+        state = {
+            "ETHUSDT": {
+                "is_holding": True,
+                "entry_price": 2800.0,
+                "highest_price": 3200.0,
+            }
+        }
+
+        for atr_multiplier in (
+            True,
+            False,
+            None,
+            "2.5",
+            float("nan"),
+            float("inf"),
+            float("-inf"),
+            0.0,
+            -1.0,
+        ):
+            with self.subTest(atr_multiplier=atr_multiplier):
+                reasons, input_blocked = evaluate_held_trend_stops(
+                    state,
+                    held_symbols=("ETHUSDT",),
+                    prices={"ETHUSDT": 3150.0},
+                    indicators_map={"ETHUSDT": {"atr14": 100.0, "sma60": 2600.0}},
+                    selected_candidates={"ETHUSDT": {}},
+                    atr_multiplier=atr_multiplier,
+                    get_symbol_trade_state_fn=lambda current_state, symbol: current_state[symbol],
+                    set_symbol_trade_state_fn=lambda *_args: None,
+                    translate_fn=lambda key, **_kwargs: key,
+                )
+
+                self.assertTrue(input_blocked)
+                self.assertEqual(reasons, {"ETHUSDT": "trend_sell_reason_missing_stop_input"})
+
+    def test_held_stop_reads_persisted_state_through_custom_helper(self) -> None:
+        state = {
+            "trade_states": {
+                "ETHUSDT": {
+                    "is_holding": True,
+                    "entry_price": 2800.0,
+                    "highest_price": 3200.0,
+                }
+            }
+        }
+
+        reasons, input_blocked = evaluate_held_trend_stops(
+            state,
+            held_symbols=("ETHUSDT",),
+            prices={"ETHUSDT": 3150.0},
+            indicators_map={"ETHUSDT": {"atr14": 100.0, "sma60": 2600.0}},
+            selected_candidates={"ETHUSDT": {}},
+            atr_multiplier=2.5,
+            get_symbol_trade_state_fn=lambda current_state, symbol: current_state[
+                "trade_states"
+            ][symbol],
+            set_symbol_trade_state_fn=lambda *_args: None,
+            translate_fn=lambda key, **_kwargs: key,
+        )
+
+        self.assertFalse(input_blocked)
+        self.assertEqual(reasons, {})
+
     def test_strategy_stop_evaluation_is_versioned_and_digest_bound(self) -> None:
         evaluation = build_strategy_stop_evaluation(
             evaluated_at="2026-08-04T08:00:00Z",
