@@ -2,7 +2,101 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import datetime, timezone
+import math
+
+
+_STRATEGY_STOP_POLICY_ID = "crypto_live_pool_rotation.executable_stop"
+_STRATEGY_STOP_POLICY_VERSION = "v1"
+
+
+def _finite_number(value):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    number = float(value)
+    return number if math.isfinite(number) else None
+
+
+def evaluate_held_trend_stops(
+    state,
+    *,
+    held_symbols,
+    prices,
+    indicators_map,
+    selected_candidates,
+    atr_multiplier,
+    get_symbol_trade_state_fn,
+    set_symbol_trade_state_fn,
+    translate_fn,
+):
+    """Evaluate every held risk symbol; incomplete inputs block CLEAR."""
+    sell_reasons = {}
+    input_blocked = False
+    valid_atr_multiplier = _finite_number(atr_multiplier)
+    for symbol in _normalize_symbol_list(held_symbols):
+        symbol_state = get_symbol_trade_state_fn(state, symbol)
+        if not isinstance(symbol_state, Mapping):
+            symbol_state = {}
+        indicators = indicators_map.get(symbol)
+        curr_price = _finite_number(prices.get(symbol))
+        atr = _finite_number(indicators.get("atr14")) if isinstance(indicators, Mapping) else None
+        sma60 = _finite_number(indicators.get("sma60")) if isinstance(indicators, Mapping) else None
+        entry_price = _finite_number(symbol_state.get("entry_price"))
+        highest_price = (
+            _finite_number(symbol_state.get("highest_price"))
+            if "highest_price" in symbol_state
+            else None
+        )
+        if (
+            not symbol_state.get("is_holding")
+            or valid_atr_multiplier is None
+            or valid_atr_multiplier <= 0.0
+            or curr_price is None
+            or atr is None
+            or atr <= 0.0
+            or sma60 is None
+            or entry_price is None
+            or entry_price <= 0.0
+            or highest_price is None
+            or highest_price <= 0.0
+            or highest_price < entry_price
+        ):
+            input_blocked = True
+            sell_reasons[symbol] = translate_fn("trend_sell_reason_missing_stop_input")
+            continue
+        reason = get_trend_sell_reason(
+            state,
+            symbol,
+            curr_price,
+            indicators,
+            selected_candidates,
+            valid_atr_multiplier,
+            get_symbol_trade_state_fn=get_symbol_trade_state_fn,
+            set_symbol_trade_state_fn=set_symbol_trade_state_fn,
+            translate_fn=translate_fn,
+        )
+        if reason:
+            sell_reasons[symbol] = str(reason)
+    return sell_reasons, input_blocked
+
+
+def build_strategy_stop_evaluation(
+    *,
+    evaluated_at,
+    decision_digest_sha256,
+    outcome,
+    action_result,
+):
+    return {
+        "evaluated": True,
+        "policy_id": _STRATEGY_STOP_POLICY_ID,
+        "policy_version": _STRATEGY_STOP_POLICY_VERSION,
+        "evaluated_at": evaluated_at,
+        "decision_digest_sha256": decision_digest_sha256,
+        "outcome": outcome,
+        "action_result": action_result,
+    }
 
 
 def _normalize_symbol_list(symbols):
