@@ -6,19 +6,41 @@ import unittest
 from unittest.mock import patch
 
 from quant_platform_kit import PortfolioSnapshot, Position
+from quant_platform_kit.risk import gate as qpk_risk_gate
+from quant_platform_kit.risk.contracts import CandidateRiskIdentity
 from quant_platform_kit.strategy_contracts import StrategyContext
 from crypto_strategies import get_strategy_entrypoint
 
 
-def _synthetic_member_mandate(*symbols: str) -> dict[str, object]:
+def _synthetic_candidate_identity(strategy_profile: str) -> CandidateRiskIdentity:
+    return CandidateRiskIdentity(
+        strategy_profile=strategy_profile,
+        account_mode="single_strategy_account_v1",
+        strategy_revision="1" * 40,
+        runner_revision="2" * 40,
+        config_sha256="3" * 64,
+        input_manifest_sha256="4" * 64,
+        authority_receipt_sha256="a" * 64,
+    )
+
+
+def _synthetic_member_mandate(
+    *symbols: str,
+    candidate_identity: CandidateRiskIdentity,
+) -> dict[str, object]:
     now = datetime.now(timezone.utc)
     return {
         "mandate_id": "synthetic_algorithm_equivalence_only",
         "mandate_version": "test-v1",
         "authority_receipt_sha256": "a" * 64,
         "authority_scope": "RESEARCH_ONLY",
-        "strategy_profile": "synthetic_test_fixture",
-        "account_mode": "synthetic_test_fixture",
+        "strategy_profile": candidate_identity.strategy_profile,
+        "account_mode": candidate_identity.account_mode,
+        "strategy_revision": candidate_identity.strategy_revision,
+        "runner_revision": candidate_identity.runner_revision,
+        "config_sha256": candidate_identity.config_sha256,
+        "input_manifest_sha256": candidate_identity.input_manifest_sha256,
+        "candidate_identity_sha256": candidate_identity.candidate_sha256,
         "effective_at": (now - timedelta(minutes=1)).isoformat().replace("+00:00", "Z"),
         "expires_at": (now + timedelta(minutes=1)).isoformat().replace("+00:00", "Z"),
         "max_snapshot_age_seconds": 300,
@@ -30,6 +52,32 @@ def _synthetic_member_mandate(*symbols: str) -> dict[str, object]:
         "allowed_nonzero_assets": list(symbols),
         "source_revision": "b371322b948e4298920a7d8613b155245dcd5f8d",
     }
+
+
+def _synthetic_risk_artifacts(
+    strategy_profile: str,
+    *symbols: str,
+) -> dict[str, object]:
+    candidate_identity = _synthetic_candidate_identity(strategy_profile)
+    return {
+        "mandate_provenance": _synthetic_member_mandate(
+            *symbols,
+            candidate_identity=candidate_identity,
+        ),
+        "candidate_risk_identity": candidate_identity,
+    }
+
+
+def _evaluate_once(entrypoint, ctx: StrategyContext):
+    engine = qpk_risk_gate.build_risk_engine()
+    with patch.object(engine, "assess", wraps=engine.assess) as assess, patch.object(
+        qpk_risk_gate,
+        "build_risk_engine",
+        return_value=engine,
+    ):
+        decision = entrypoint.evaluate(ctx)
+    assess.assert_called_once()
+    return decision
 
 
 def _fresh_as_of() -> datetime:
@@ -100,7 +148,8 @@ class CryptoStrategyEntrypointTests(unittest.TestCase):
             "crypto_strategies.entrypoints._load_legacy_modules",
             return_value=(fake_core, fake_rotation),
         ):
-            decision = entrypoint.evaluate(
+            decision = _evaluate_once(
+                entrypoint,
                 StrategyContext(
                     as_of="2026-04-06",
                     market_data={
@@ -250,7 +299,9 @@ class CryptoStrategyEntrypointTests(unittest.TestCase):
             allocate_trend_buy_budget_fn=legacy_core.allocate_trend_buy_budget,
         )
 
-        decision = entrypoint.evaluate(
+        decision = _evaluate_once(
+
+            entrypoint,
             StrategyContext(
                 as_of="2026-04-06",
                 market_data={
@@ -278,8 +329,12 @@ class CryptoStrategyEntrypointTests(unittest.TestCase):
                 state=state,
                 artifacts={
                     "trend_pool_contract": {"source": "explicit_artifact"},
-                    "mandate_provenance": _synthetic_member_mandate(
-                        "BTCUSDT", "BNBUSDT", "ETHUSDT", "SOLUSDT"
+                    **_synthetic_risk_artifacts(
+                        "crypto_live_pool_rotation",
+                        "BTCUSDT",
+                        "BNBUSDT",
+                        "ETHUSDT",
+                        "SOLUSDT",
                     ),
                 },
             )
@@ -331,7 +386,9 @@ class CryptoStrategyEntrypointTests(unittest.TestCase):
                 self.skipTest("pandas is not installed")
             raise
 
-        decision = entrypoint.evaluate(
+        decision = _evaluate_once(
+
+            entrypoint,
             StrategyContext(
                 as_of="2026-04-06",
                 market_data={
@@ -386,8 +443,11 @@ class CryptoStrategyEntrypointTests(unittest.TestCase):
                 },
                 state={},
                 artifacts={
-                    "mandate_provenance": _synthetic_member_mandate(
-                        "BTCUSDT", "ETHUSDT", "SOLUSDT"
+                    **_synthetic_risk_artifacts(
+                        "crypto_equity_combo",
+                        "BTCUSDT",
+                        "ETHUSDT",
+                        "SOLUSDT",
                     )
                 },
             )
@@ -416,7 +476,8 @@ class CryptoStrategyEntrypointTests(unittest.TestCase):
                 self.skipTest("pandas is not installed")
             raise
         try:
-            decision = entrypoint.evaluate(
+            decision = _evaluate_once(
+                entrypoint,
                 StrategyContext(
                     as_of="2026-04-06",
                     market_data={
@@ -473,7 +534,8 @@ class CryptoStrategyEntrypointTests(unittest.TestCase):
         )
         def evaluate(prices, indicators):
             now = _fresh_as_of()
-            return entrypoint.evaluate(
+            return _evaluate_once(
+                entrypoint,
                 StrategyContext(
                     as_of=now,
                     market_data={
@@ -506,8 +568,10 @@ class CryptoStrategyEntrypointTests(unittest.TestCase):
                         }
                     },
                     artifacts={
-                        "mandate_provenance": _synthetic_member_mandate(
-                            "BTCUSDT", "ETHUSDT"
+                        **_synthetic_risk_artifacts(
+                            "crypto_live_pool_rotation",
+                            "BTCUSDT",
+                            "ETHUSDT",
                         )
                     },
                 )
@@ -578,7 +642,8 @@ class CryptoStrategyEntrypointTests(unittest.TestCase):
             "crypto_strategies.entrypoints._load_legacy_modules",
             return_value=(fake_core, fake_rotation),
         ):
-            decision = entrypoint.evaluate(
+            decision = _evaluate_once(
+                entrypoint,
                 StrategyContext(
                     as_of=now,
                     market_data={
@@ -607,8 +672,10 @@ class CryptoStrategyEntrypointTests(unittest.TestCase):
                     },
                     state={},
                     artifacts={
-                        "mandate_provenance": _synthetic_member_mandate(
-                            "BTCUSDT", "ETHUSDT"
+                        **_synthetic_risk_artifacts(
+                            "crypto_live_pool_rotation",
+                            "BTCUSDT",
+                            "ETHUSDT",
                         )
                     },
                 )
@@ -666,7 +733,8 @@ class CryptoStrategyEntrypointTests(unittest.TestCase):
             "crypto_strategies.entrypoints._load_legacy_modules",
             return_value=(fake_core, fake_rotation),
         ):
-            decision = entrypoint.evaluate(
+            decision = _evaluate_once(
+                entrypoint,
                 StrategyContext(
                     as_of=now,
                     market_data={
@@ -703,8 +771,10 @@ class CryptoStrategyEntrypointTests(unittest.TestCase):
                         "set_symbol_trade_state_fn": set_symbol_trade_state,
                     },
                     artifacts={
-                        "mandate_provenance": _synthetic_member_mandate(
-                            "BTCUSDT", "ETHUSDT"
+                        **_synthetic_risk_artifacts(
+                            "crypto_live_pool_rotation",
+                            "BTCUSDT",
+                            "ETHUSDT",
                         )
                     },
                 )
@@ -750,7 +820,8 @@ class CryptoStrategyEntrypointTests(unittest.TestCase):
             symbol_state = {"is_holding": True, "entry_price": 2800.0}
             if highest_price is not missing:
                 symbol_state["highest_price"] = highest_price
-            return entrypoint.evaluate(
+            return _evaluate_once(
+                entrypoint,
                 StrategyContext(
                     as_of=now,
                     market_data={
@@ -779,8 +850,10 @@ class CryptoStrategyEntrypointTests(unittest.TestCase):
                     },
                     state={"ETHUSDT": symbol_state},
                     artifacts={
-                        "mandate_provenance": _synthetic_member_mandate(
-                            "BTCUSDT", "ETHUSDT"
+                        **_synthetic_risk_artifacts(
+                            "crypto_live_pool_rotation",
+                            "BTCUSDT",
+                            "ETHUSDT",
                         )
                     },
                 )

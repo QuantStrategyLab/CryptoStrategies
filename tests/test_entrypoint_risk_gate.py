@@ -4,20 +4,48 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 from quant_platform_kit.common.models import PortfolioSnapshot, Position
-from quant_platform_kit.risk.contracts import RiskGateAssessment, RiskGateResult
+from quant_platform_kit.risk import gate as qpk_risk_gate
+from quant_platform_kit.risk.contracts import (
+    CandidateRiskIdentity,
+    RiskGateAssessment,
+    RiskGateResult,
+)
 from quant_platform_kit.strategy_contracts import BudgetIntent, PositionTarget, StrategyContext, StrategyDecision
 
 from crypto_strategies.entrypoints._common import apply_risk_gate
 
 
-def _zero_cap_mandate(now: datetime) -> dict[str, object]:
+def _candidate_identity(
+    *, strategy_profile: str = "crypto_live_pool_rotation"
+) -> CandidateRiskIdentity:
+    return CandidateRiskIdentity(
+        strategy_profile=strategy_profile,
+        account_mode="single_strategy_account_v1",
+        strategy_revision="1" * 40,
+        runner_revision="2" * 40,
+        config_sha256="3" * 64,
+        input_manifest_sha256="4" * 64,
+        authority_receipt_sha256="246c39b8023b25f913bf1e67dc175005955a7102f3727dfc1bd8e981cf8128ee",
+    )
+
+
+def _zero_cap_mandate(
+    now: datetime,
+    *,
+    candidate_identity: CandidateRiskIdentity,
+) -> dict[str, object]:
     return {
         "mandate_id": "binance_crypto_research_only_v1",
         "mandate_version": "2026-08-04.1",
-        "authority_receipt_sha256": "246c39b8023b25f913bf1e67dc175005955a7102f3727dfc1bd8e981cf8128ee",
+        "authority_receipt_sha256": candidate_identity.authority_receipt_sha256,
         "authority_scope": "RESEARCH_ONLY",
-        "strategy_profile": "crypto_live_pool_rotation",
-        "account_mode": "single_strategy_account_v1",
+        "strategy_profile": candidate_identity.strategy_profile,
+        "account_mode": candidate_identity.account_mode,
+        "strategy_revision": candidate_identity.strategy_revision,
+        "runner_revision": candidate_identity.runner_revision,
+        "config_sha256": candidate_identity.config_sha256,
+        "input_manifest_sha256": candidate_identity.input_manifest_sha256,
+        "candidate_identity_sha256": candidate_identity.candidate_sha256,
         "effective_at": (now - timedelta(minutes=1)).isoformat().replace("+00:00", "Z"),
         "expires_at": (now + timedelta(minutes=1)).isoformat().replace("+00:00", "Z"),
         "max_snapshot_age_seconds": 300,
@@ -31,6 +59,36 @@ def _zero_cap_mandate(now: datetime) -> dict[str, object]:
     }
 
 
+def _candidate_bound_artifacts(
+    now: datetime,
+    *,
+    candidate_identity: CandidateRiskIdentity | None = None,
+) -> dict[str, object]:
+    candidate = candidate_identity or _candidate_identity()
+    return {
+        "mandate_provenance": _zero_cap_mandate(
+            now,
+            candidate_identity=candidate,
+        ),
+        "candidate_risk_identity": candidate,
+    }
+
+
+def _apply_risk_gate_once(
+    decision: StrategyDecision,
+    **kwargs: object,
+) -> StrategyDecision:
+    engine = qpk_risk_gate.build_risk_engine()
+    with patch.object(engine, "assess", wraps=engine.assess) as assess, patch.object(
+        qpk_risk_gate,
+        "build_risk_engine",
+        return_value=engine,
+    ):
+        result = apply_risk_gate(decision, **kwargs)
+    assess.assert_called_once()
+    return result
+
+
 def test_apply_risk_gate_enriches_stop_loss_diagnostics_from_portfolio() -> None:
     snapshot = PortfolioSnapshot(
         as_of=datetime(2026, 7, 9, tzinfo=timezone.utc),
@@ -42,7 +100,7 @@ def test_apply_risk_gate_enriches_stop_loss_diagnostics_from_portfolio() -> None
     )
     ctx = StrategyContext(as_of=snapshot.as_of, portfolio=snapshot, market_data={}, state={}, runtime_config={})
     decision = StrategyDecision(positions=(PositionTarget(symbol="BTCUSDT", target_weight=0.5),))
-    result = apply_risk_gate(decision, ctx=ctx)
+    result = _apply_risk_gate_once(decision, ctx=ctx)
     assert result.positions == ()
     assert "rejected:risk_gate_assessment" in result.risk_flags
     assert result.diagnostics["member_risk_assessment"]["outcome"] == "REJECT"
@@ -62,14 +120,14 @@ def test_apply_risk_gate_uses_member_evidence_and_zero_cap_clears_authority() ->
         as_of=now,
         portfolio=snapshot,
         market_data={"private_api_token": "must-not-propagate"},
-        artifacts={"mandate_provenance": _zero_cap_mandate(now)},
+        artifacts=_candidate_bound_artifacts(now),
     )
     decision = StrategyDecision(
         positions=(PositionTarget(symbol="BTCUSDT", target_weight=0.1),),
         budgets=(BudgetIntent(name="btc", amount=1.0),),
     )
 
-    result = apply_risk_gate(decision, ctx=ctx)
+    result = _apply_risk_gate_once(decision, ctx=ctx)
 
     assessment = result.diagnostics["member_risk_assessment"]
     assert result.positions == ()
@@ -84,7 +142,8 @@ def test_apply_risk_gate_uses_member_evidence_and_zero_cap_clears_authority() ->
 
 def test_apply_risk_gate_preserves_stricter_strategy_concentration_cap() -> None:
     now = datetime.now(timezone.utc)
-    mandate = _zero_cap_mandate(now)
+    candidate_identity = _candidate_identity()
+    mandate = _zero_cap_mandate(now, candidate_identity=candidate_identity)
     mandate.update(
         {
             "mandate_id": "synthetic_algorithm_equivalence_only",
@@ -104,10 +163,13 @@ def test_apply_risk_gate_preserves_stricter_strategy_concentration_cap() -> None
     ctx = StrategyContext(
         as_of=now,
         portfolio=snapshot,
-        artifacts={"mandate_provenance": mandate},
+        artifacts={
+            "mandate_provenance": mandate,
+            "candidate_risk_identity": candidate_identity,
+        },
     )
 
-    result = apply_risk_gate(
+    result = _apply_risk_gate_once(
         StrategyDecision(positions=(PositionTarget(symbol="BTCUSDT", target_weight=0.6),)),
         ctx=ctx,
         max_single_weight=0.5,
@@ -122,7 +184,8 @@ def test_apply_risk_gate_preserves_stricter_strategy_concentration_cap() -> None
 def test_apply_risk_gate_preserves_hard_position_count_limit() -> None:
     now = datetime.now(timezone.utc)
     symbols = [f"ASSET{index}USDT" for index in range(21)]
-    mandate = _zero_cap_mandate(now)
+    candidate_identity = _candidate_identity()
+    mandate = _zero_cap_mandate(now, candidate_identity=candidate_identity)
     mandate.update(
         {
             "mandate_id": "synthetic_algorithm_equivalence_only",
@@ -142,7 +205,10 @@ def test_apply_risk_gate_preserves_hard_position_count_limit() -> None:
     ctx = StrategyContext(
         as_of=now,
         portfolio=snapshot,
-        artifacts={"mandate_provenance": mandate},
+        artifacts={
+            "mandate_provenance": mandate,
+            "candidate_risk_identity": candidate_identity,
+        },
     )
     decision = StrategyDecision(
         positions=tuple(
@@ -151,7 +217,7 @@ def test_apply_risk_gate_preserves_hard_position_count_limit() -> None:
         budgets=(BudgetIntent(name="portfolio", amount=1.0),),
     )
 
-    result = apply_risk_gate(decision, ctx=ctx)
+    result = _apply_risk_gate_once(decision, ctx=ctx)
 
     assert result.diagnostics["member_risk_assessment"]["outcome"] == "APPROVE"
     assert result.positions == ()
@@ -162,7 +228,8 @@ def test_apply_risk_gate_preserves_hard_position_count_limit() -> None:
 def test_apply_risk_gate_preserves_hard_total_exposure_limit() -> None:
     now = datetime.now(timezone.utc)
     symbols = [f"ASSET{index}USDT" for index in range(5)]
-    mandate = _zero_cap_mandate(now)
+    candidate_identity = _candidate_identity()
+    mandate = _zero_cap_mandate(now, candidate_identity=candidate_identity)
     mandate.update(
         {
             "mandate_id": "synthetic_algorithm_equivalence_only",
@@ -182,7 +249,10 @@ def test_apply_risk_gate_preserves_hard_total_exposure_limit() -> None:
     ctx = StrategyContext(
         as_of=now,
         portfolio=snapshot,
-        artifacts={"mandate_provenance": mandate},
+        artifacts={
+            "mandate_provenance": mandate,
+            "candidate_risk_identity": candidate_identity,
+        },
     )
     decision = StrategyDecision(
         positions=tuple(
@@ -202,8 +272,10 @@ def test_apply_risk_gate_preserves_hard_total_exposure_limit() -> None:
         mandate_version="test-v1",
         mandate_authority_receipt_sha256="a" * 64,
         mandate_scope="RESEARCH_ONLY",
+        candidate_identity_sha256=candidate_identity.candidate_sha256,
         decision_digest_sha256="b" * 64,
         portfolio_snapshot_digest_sha256="c" * 64,
+        normalization_origin_digest_sha256=None,
         effective_exposure_cap=2.0,
         observed_effective_exposure=0.0,
         proposed_effective_exposure=1.25,
@@ -216,8 +288,9 @@ def test_apply_risk_gate_preserves_hard_total_exposure_limit() -> None:
             decision=decision,
             assessment=permissive_assessment,
         ),
-    ):
+    ) as assess:
         result = apply_risk_gate(decision, ctx=ctx)
+    assess.assert_called_once()
 
     assert result.diagnostics["member_risk_assessment"]["outcome"] == "APPROVE"
     assert result.positions == ()
@@ -235,9 +308,102 @@ def test_apply_risk_gate_preserves_hard_total_exposure_limit() -> None:
                 decision=invalid_decision,
                 assessment=permissive_assessment,
             ),
-        ):
+        ) as assess:
             invalid_result = apply_risk_gate(invalid_decision, ctx=ctx)
+        assess.assert_called_once()
 
         assert invalid_result.positions == ()
         assert invalid_result.budgets == ()
         assert "rejected:overexposed" in invalid_result.risk_flags
+
+
+def test_apply_risk_gate_does_not_coerce_mapping_candidate_identity() -> None:
+    now = datetime.now(timezone.utc)
+    candidate_identity = _candidate_identity()
+    artifacts = _candidate_bound_artifacts(now, candidate_identity=candidate_identity)
+    artifacts["candidate_risk_identity"] = {
+        "strategy_profile": candidate_identity.strategy_profile,
+        "candidate_sha256": candidate_identity.candidate_sha256,
+    }
+    ctx = StrategyContext(
+        as_of=now,
+        portfolio=PortfolioSnapshot(
+            as_of=now,
+            total_equity=1000.0,
+            metadata={"observed_effective_exposure": 0.0},
+        ),
+        artifacts=artifacts,
+    )
+
+    result = _apply_risk_gate_once(
+        StrategyDecision(
+            positions=(PositionTarget(symbol="BTCUSDT", target_weight=0.1),)
+        ),
+        ctx=ctx,
+    )
+
+    assessment = result.diagnostics["member_risk_assessment"]
+    assert result.positions == ()
+    assert result.budgets == ()
+    assert assessment["outcome"] == "REJECT"
+    assert "missing_candidate_identity" in assessment["reason_codes"]
+
+
+def test_apply_risk_gate_wrong_typed_candidate_identity_fails_closed() -> None:
+    now = datetime.now(timezone.utc)
+    expected_identity = _candidate_identity()
+    wrong_identity = _candidate_identity(strategy_profile="crypto_equity_combo")
+    artifacts = _candidate_bound_artifacts(now, candidate_identity=expected_identity)
+    artifacts["candidate_risk_identity"] = wrong_identity
+    ctx = StrategyContext(
+        as_of=now,
+        portfolio=PortfolioSnapshot(
+            as_of=now,
+            total_equity=1000.0,
+            metadata={"observed_effective_exposure": 0.0},
+        ),
+        artifacts=artifacts,
+    )
+
+    result = _apply_risk_gate_once(
+        StrategyDecision(
+            positions=(PositionTarget(symbol="BTCUSDT", target_weight=0.1),)
+        ),
+        ctx=ctx,
+    )
+
+    assessment = result.diagnostics["member_risk_assessment"]
+    assert result.positions == ()
+    assert result.budgets == ()
+    assert assessment["outcome"] == "REJECT"
+    assert "candidate_strategy_profile_mismatch" in assessment["reason_codes"]
+
+
+def test_apply_risk_gate_incomplete_mandate_stays_fail_closed() -> None:
+    now = datetime.now(timezone.utc)
+    candidate_identity = _candidate_identity()
+    ctx = StrategyContext(
+        as_of=now,
+        portfolio=PortfolioSnapshot(
+            as_of=now,
+            total_equity=1000.0,
+            metadata={"observed_effective_exposure": 0.0},
+        ),
+        artifacts={
+            "mandate_provenance": {"mandate_id": "incomplete"},
+            "candidate_risk_identity": candidate_identity,
+        },
+    )
+
+    result = _apply_risk_gate_once(
+        StrategyDecision(
+            positions=(PositionTarget(symbol="BTCUSDT", target_weight=0.1),)
+        ),
+        ctx=ctx,
+    )
+
+    assessment = result.diagnostics["member_risk_assessment"]
+    assert result.positions == ()
+    assert result.budgets == ()
+    assert assessment["outcome"] == "REJECT"
+    assert "invalid_mandate" in assessment["reason_codes"]

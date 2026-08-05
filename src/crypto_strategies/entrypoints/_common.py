@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from dataclasses import asdict
 from typing import Any
 
+from quant_platform_kit.risk.contracts import CandidateRiskIdentity
 from quant_platform_kit.risk.gate import assess_with_evidence as _qpk_assess_with_evidence
 from quant_platform_kit.risk.gate import enrich_decision_risk_diagnostics
 from quant_platform_kit.risk.portfolio_diagnostics import extract_portfolio_risk_diagnostics
@@ -73,12 +74,16 @@ def apply_risk_gate(
     mandate_provenance = None if ctx is None else ctx.artifacts.get("mandate_provenance")
     if not isinstance(mandate_provenance, Mapping):
         mandate_provenance = {}
+    candidate_identity = None if ctx is None else ctx.artifacts.get("candidate_risk_identity")
+    if not isinstance(candidate_identity, CandidateRiskIdentity):
+        candidate_identity = None
     result = _qpk_assess_with_evidence(
         decision,
         snapshot,
         scope="MEMBER",
         mandate_provenance=mandate_provenance,
         market_data=market_data or {},
+        candidate_identity=candidate_identity,
     )
     risk_flags = tuple(
         dict.fromkeys(tuple(decision.risk_flags or ()) + tuple(result.decision.risk_flags or ()))
