@@ -1,11 +1,53 @@
-from pathlib import Path
 import tomllib
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+QPK_REVISION = "2f75b59289ef24ab47a3ed8d522c9ef8d6aea6b2"
+QPK_URL = (
+    "quant-platform-kit @ git+https://github.com/QuantStrategyLab/"
+    f"QuantPlatformKit.git@{QPK_REVISION}"
+)
 
 
 def test_qsl_compat_metadata_exists_and_bundle() -> None:
-    qsl_path = Path(__file__).resolve().parents[1] / "qsl.toml"
+    qsl_path = ROOT / "qsl.toml"
     assert qsl_path.exists(), "qsl.toml missing"
     with qsl_path.open("rb") as f:
         data = tomllib.load(f)
 
     assert data.get("compat", {}).get("bundle") == "2026.07.4", "compat.bundle mismatch"
+
+
+def test_qpk_pin_lock_and_ci_are_dependency_enabled() -> None:
+    with (ROOT / "pyproject.toml").open("rb") as file:
+        pyproject = tomllib.load(file)
+    with (ROOT / "qsl.toml").open("rb") as file:
+        qsl = tomllib.load(file)
+    with (ROOT / "uv.lock").open("rb") as file:
+        lock = tomllib.load(file)
+
+    assert pyproject["project"]["dependencies"] == [QPK_URL]
+    assert qsl["compat"]["requires"] == [QPK_URL]
+
+    packages = {package["name"]: package for package in lock["package"]}
+    locked_qpk = packages["quant-platform-kit"]
+    locked_crypto = packages["crypto-strategies"]
+    assert locked_qpk["source"]["git"] == (
+        "https://github.com/QuantStrategyLab/QuantPlatformKit.git"
+        f"?rev={QPK_REVISION}#{QPK_REVISION}"
+    )
+    assert locked_crypto["metadata"]["requires-dist"] == [
+        {
+            "name": "quant-platform-kit",
+            "git": (
+                "https://github.com/QuantStrategyLab/QuantPlatformKit.git"
+                f"?rev={QPK_REVISION}"
+            ),
+        }
+    ]
+
+    ci = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+    assert "--no-deps" not in ci
+    assert "python -m pip install -e ." in ci
+    assert "python -m pip check" in ci
