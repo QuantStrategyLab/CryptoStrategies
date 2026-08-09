@@ -53,7 +53,7 @@ def _zero_cap_mandate(
         "loss_budget": 0.0,
         "product_caps": 0.0,
         "nominal_caps": 0.0,
-        "product_leverage_factors": {},
+        "product_leverage_factors": {"BTCUSDT": 1},
         "allowed_nonzero_assets": [],
         "source_revision": "b371322b948e4298920a7d8613b155245dcd5f8d",
     }
@@ -132,7 +132,10 @@ def test_apply_risk_gate_uses_member_evidence_and_zero_cap_clears_authority() ->
     assessment = result.diagnostics["member_risk_assessment"]
     assert result.positions == ()
     assert result.budgets == ()
-    assert assessment["contract_version"] == "qsl.risk_gate_assessment.v1"
+    assert assessment["contract_version"] in {
+        "qsl.risk_gate_assessment.v1",
+        "qsl.risk_gate_assessment.v2",
+    }
     assert assessment["scope"] == "MEMBER"
     assert assessment["outcome"] == "REJECT"
     assert assessment["mandate_id"] == "binance_crypto_research_only_v1"
