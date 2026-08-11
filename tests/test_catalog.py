@@ -10,9 +10,12 @@ from crypto_strategies.catalog import (
 )
 
 
-def test_only_live_pool_rotation_remains_runtime_enabled() -> None:
-    assert get_runtime_enabled_profiles() == frozenset({CRYPTO_LIVE_POOL_ROTATION_PROFILE})
-    assert get_strategy_metadata(CRYPTO_LIVE_POOL_ROTATION_PROFILE).status == "runtime_enabled"
+def test_live_pool_rotation_is_research_only_without_accepted_evidence() -> None:
+    assert get_runtime_enabled_profiles() == frozenset()
+    metadata = get_strategy_metadata(CRYPTO_LIVE_POOL_ROTATION_PROFILE)
+    assert metadata.status == "research_backtest_only"
+    assert "current accepted promotion-grade evidence-v2" in metadata.description
+    assert "exact human acceptance identity" in metadata.description
 
 
 def test_non_live_crypto_profiles_are_not_runtime_enabled() -> None:
