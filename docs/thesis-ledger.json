@@ -10,7 +10,7 @@
       "last_verified": "2026-07-08",
       "verdict": "active",
       "hit_rate": null,
-      "status_note": "runtime_enabled"
+      "status_note": "research_backtest_only; NOT_CURRENTLY_EVIDENCED is a catalog-claim status, not a finding of invalidity or runtime inactivity"
     },
     "crypto_btc_dca": {
       "thesis": "BTC 智能定投在波动分层下优于固定金额 DCA",
