@@ -21,6 +21,10 @@ CRYPTO_LIVE_POOL_ROTATION_ALIASES = (CRYPTO_LEADER_ROTATION_PROFILE,)
 CRYPTO_BTC_DCA_PROFILE = "crypto_btc_dca"
 CRYPTO_TREND_ROTATION_PROFILE = "crypto_trend_rotation"
 CRYPTO_EQUITY_COMBO_PROFILE = "crypto_equity_combo"
+CATALOG_NOT_CURRENTLY_EVIDENCED_BLOCKED_REASON = (
+    "Runtime/live catalog claim blocked: current accepted promotion-grade evidence-v2 "
+    "and exact human acceptance identity are not currently evidenced."
+)
 
 CRYPTO_CANONICAL_REQUIRED_INPUTS = frozenset(
     {
@@ -249,13 +253,16 @@ STRATEGY_METADATA: dict[str, StrategyMetadata] = {
         canonical_profile=CRYPTO_LIVE_POOL_ROTATION_PROFILE,
         display_name="Crypto Live Pool Rotation",
         localized_display_names={"zh": "加密实时池轮动"},
-        description="Trend-following crypto rotation with staged entries, degradation controls, and cash parking.",
+        description=(
+            "Trend-following crypto rotation with staged entries, degradation controls, and cash parking. "
+            + CATALOG_NOT_CURRENTLY_EVIDENCED_BLOCKED_REASON
+        ),
         aliases=CRYPTO_LIVE_POOL_ROTATION_ALIASES,
         cadence="daily",
         asset_scope="liquid_crypto_assets",
         benchmark="BTC",
         role="crypto_offensive_rotation",
-        status="runtime_enabled",
+        status="research_backtest_only",
     ),
     CRYPTO_BTC_DCA_PROFILE: StrategyMetadata(
         canonical_profile=CRYPTO_BTC_DCA_PROFILE,
