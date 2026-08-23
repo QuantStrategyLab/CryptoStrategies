@@ -13,6 +13,7 @@ from quant_platform_kit.common.strategies import (
     get_catalog_strategy_metadata,
     load_strategy_entrypoint,
 )
+from crypto_strategies.runtime_allowlist import get_runtime_selectable_profiles
 
 CRYPTO_LIVE_POOL_ROTATION_PROFILE = "crypto_live_pool_rotation"
 CRYPTO_LEADER_ROTATION_PROFILE = "crypto_leader_rotation"
@@ -318,11 +319,7 @@ def get_runtime_enabled_profiles() -> frozenset[str]:
     This defines the rollout allowlist — the upper bound of what profiles
     may be enabled.
     """
-    return frozenset(
-        profile
-        for profile, metadata in STRATEGY_METADATA.items()
-        if str(metadata.status or "").strip().lower() == "runtime_enabled"
-    )
+    return get_runtime_selectable_profiles()
 
 
 def get_strategy_catalog() -> StrategyCatalog:
