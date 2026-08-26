@@ -11,9 +11,9 @@ dependencies = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "quant-platform-kit", git = "https://github.com/QuantStrategyLab/QuantPlatformKit.git?rev=3efc9bb2325b7f8f246d465db1cca0601ead6323" }]
+requires-dist = [{ name = "quant-platform-kit", git = "https://github.com/QuantStrategyLab/QuantPlatformKit.git?rev=2f84b5f1a22b134ea677a94850318ce8251ed40e" }]
 
 [[package]]
 name = "quant-platform-kit"
 version = "0.10.0"
-source = { git = "https://github.com/QuantStrategyLab/QuantPlatformKit.git?rev=3efc9bb2325b7f8f246d465db1cca0601ead6323#3efc9bb2325b7f8f246d465db1cca0601ead6323" }
+source = { git = "https://github.com/QuantStrategyLab/QuantPlatformKit.git?rev=2f84b5f1a22b134ea677a94850318ce8251ed40e#2f84b5f1a22b134ea677a94850318ce8251ed40e" }
