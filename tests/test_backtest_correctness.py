@@ -116,6 +116,28 @@ def test_full_cash_entry_and_exit_charge_full_turnover() -> None:
     assert result.trade_log["fee"].tolist() == pytest.approx([0.01, 0.01])
 
 
+def test_full_asset_replacement_has_unit_turnover() -> None:
+    panel = _panel(
+        [
+            ("2024-01-01", "A", 100.0, 1.0),
+            ("2024-01-01", "B", 100.0, 0.0),
+            ("2024-01-02", "A", 100.0, 0.0),
+            ("2024-01-02", "B", 100.0, 1.0),
+            ("2024-01-03", "A", 100.0, 0.0),
+            ("2024-01-03", "B", 100.0, 1.0),
+        ]
+    )
+
+    result = run_live_pool_rotation_backtest(
+        panel,
+        top_n=1,
+        rebalance_every=1,
+        signal_lag_days=0,
+    )
+
+    assert result.trade_log["turnover"].tolist() == pytest.approx([1.0, 1.0])
+
+
 def test_runner_rejects_conflicting_fee_aliases() -> None:
     panel = _panel([
         ("2024-01-01", "A", 100.0, 1.0),
@@ -127,6 +149,25 @@ def test_runner_rejects_conflicting_fee_aliases() -> None:
 
     with pytest.raises(ValueError, match="fee_rate and fee_bps disagree"):
         runner.run(PROFILE_NAME, {"fee_bps": 10, "fee_rate": 0.01})
+
+
+def test_runner_accepts_consistent_fee_aliases() -> None:
+    panel = _panel([
+        ("2024-01-01", "A", 100.0, 1.0),
+        ("2024-01-02", "A", 100.0, 1.0),
+        ("2024-01-03", "A", 100.0, 1.0),
+    ]).reset_index()
+    panel["date"] = pd.to_datetime(panel["date"])
+    indexed_panel = panel.set_index(["date", "symbol"])
+
+    both_aliases = CryptoLivePoolBacktestRunner(panel=indexed_panel)
+    fee_bps_only = CryptoLivePoolBacktestRunner(panel=indexed_panel)
+
+    both_result = both_aliases.run(PROFILE_NAME, {"fee_bps": 10, "fee_rate": 0.001})
+    bps_result = fee_bps_only.run(PROFILE_NAME, {"fee_bps": 10})
+
+    assert both_result.total_return == pytest.approx(bps_result.total_return)
+    pd.testing.assert_series_equal(both_aliases.last_daily_returns, fee_bps_only.last_daily_returns)
 
 
 @pytest.mark.parametrize("final_open", [100.0, 200.0])
