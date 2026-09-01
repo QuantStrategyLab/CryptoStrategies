@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from datetime import date, datetime, timezone
 from typing import Any, Mapping, cast
 
@@ -22,6 +23,12 @@ PROFILE_NAME = "crypto_live_pool_rotation"
 DEFAULT_MIN_HISTORY_DAYS = 120
 COMBO_DEFAULT_MIN_HISTORY_DAYS = 260
 SUPPORTED_PROFILES = frozenset({PROFILE_NAME, CRYPTO_EQUITY_COMBO_PROFILE})
+SYNTHETIC_PANEL_GENERATOR_VERSION = "crypto_live_pool_panel.v2"
+
+
+def _synthetic_digest_int(*parts: str) -> int:
+    material = "\x1f".join((SYNTHETIC_PANEL_GENERATOR_VERSION, *parts)).encode("utf-8")
+    return int.from_bytes(hashlib.sha256(material).digest()[:8], "big", signed=False)
 
 
 def _synthetic_panel(*, days: int = 1500, symbols: tuple[str, ...] = ("BTCUSDT", "ETHUSDT", "SOLUSDT")) -> pd.DataFrame:
@@ -29,10 +36,10 @@ def _synthetic_panel(*, days: int = 1500, symbols: tuple[str, ...] = ("BTCUSDT",
     index = pd.MultiIndex.from_product([dates, symbols], names=["date", "symbol"])
     panel = pd.DataFrame(index=index)
     panel["in_universe"] = True
-    rng = np.random.default_rng(42)
     rows: list[float] = []
     for symbol in symbols:
-        price = 100.0 + hash(symbol) % 50
+        price = 100.0 + _synthetic_digest_int("initial_price", symbol) % 50
+        rng = np.random.default_rng(_synthetic_digest_int("price_rng", symbol))
         for _ in dates:
             price *= 1.0 + float(rng.normal(0.001, 0.02))
             rows.append(price)
@@ -40,8 +47,10 @@ def _synthetic_panel(*, days: int = 1500, symbols: tuple[str, ...] = ("BTCUSDT",
     scores: list[float] = []
     for day_idx, _day in enumerate(dates):
         for sym_idx, symbol in enumerate(symbols):
-            scores.append(float((day_idx + sym_idx * 17 + hash(symbol) % 11) % 100) / 100.0)
+            salt = _synthetic_digest_int("score", symbol) % 11
+            scores.append(float((day_idx + sym_idx * 17 + salt) % 100) / 100.0)
     panel["final_score"] = scores
+    panel.attrs["synthetic_generator_version"] = SYNTHETIC_PANEL_GENERATOR_VERSION
     return panel.sort_index()
 
 
@@ -185,6 +194,10 @@ class CryptoLivePoolBacktestRunner:
             sliced,
             top_n=int(params.get("top_n", 2)),
             rebalance_every=int(params.get("rebalance_every", 7)),
+            signal_lag_days=int(params.get("signal_lag_days", params.get("signal_lag", 1))),
+            fee_bps=float(params["fee_bps"]) if "fee_bps" in params else None,
+            fee_rate=float(params["fee_rate"]) if "fee_rate" in params else None,
+            slippage_bps=float(params.get("slippage_bps", 0.0)),
         )
         self._last_daily_returns = _slice_daily_returns(
             result.returns,
@@ -197,7 +210,7 @@ class CryptoLivePoolBacktestRunner:
         return _metrics_to_result(
             strategy_profile=strategy_profile,
             params=params,
-            metrics=_performance_metrics(self._last_daily_returns),
+            metrics=result.metrics,
             start_date=start_date or eval_dates.min().date(),
             end_date=end_date or eval_dates.max().date(),
             run_duration_seconds=elapsed,
@@ -308,6 +321,7 @@ __all__ = [
     "COMBO_DEFAULT_MIN_HISTORY_DAYS",
     "DEFAULT_MIN_HISTORY_DAYS",
     "PROFILE_NAME",
+    "SYNTHETIC_PANEL_GENERATOR_VERSION",
     "SUPPORTED_PROFILES",
     "CryptoEquityComboBacktestRunner",
     "CryptoLivePoolBacktestRunner",
