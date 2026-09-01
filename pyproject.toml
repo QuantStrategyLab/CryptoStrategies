@@ -12,6 +12,12 @@ dependencies = [
   "quant-platform-kit @ git+https://github.com/QuantStrategyLab/QuantPlatformKit.git@ff70b162ac8e50e1ece617e570dab76b6740d41e",
 ]
 
+[project.optional-dependencies]
+research = [
+  "numpy>=1.26",
+  "pandas>=2.0",
+]
+
 [tool.setuptools]
 package-dir = {"" = "src"}
 

@@ -37,7 +37,12 @@ def test_qpk_pin_lock_and_ci_are_dependency_enabled() -> None:
         "https://github.com/QuantStrategyLab/QuantPlatformKit.git"
         f"?rev={QPK_REVISION}#{QPK_REVISION}"
     )
-    assert locked_crypto["metadata"]["requires-dist"] == [
+    qpk_requirements = [
+        requirement
+        for requirement in locked_crypto["metadata"]["requires-dist"]
+        if requirement["name"] == "quant-platform-kit"
+    ]
+    assert qpk_requirements == [
         {
             "name": "quant-platform-kit",
             "git": (
