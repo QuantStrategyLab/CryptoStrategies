@@ -74,7 +74,7 @@ def run_live_pool_rotation_backtest(
     top_n: int = 2,
     rebalance_every: int = 7,
     signal_lag_days: int = 1,
-    fee_bps: float = 0.0,
+    fee_bps: float | None = None,
     slippage_bps: float = 0.0,
     signal_lag: int | None = None,
     fee_rate: float | None = None,
@@ -94,9 +94,11 @@ def run_live_pool_rotation_backtest(
             raise ValueError("signal_lag and signal_lag_days disagree")
         signal_lag_days = int(signal_lag)
     if fee_rate is not None:
-        if fee_bps != 0.0 and not math.isclose(float(fee_bps), float(fee_rate) * 10_000.0):
+        if fee_bps is not None and not math.isclose(float(fee_bps), float(fee_rate) * 10_000.0):
             raise ValueError("fee_rate and fee_bps disagree")
         fee_bps = float(fee_rate) * 10_000.0
+    elif fee_bps is None:
+        fee_bps = 0.0
     if int(signal_lag_days) < 0:
         raise ValueError("signal_lag_days must be non-negative")
     if not math.isfinite(float(fee_bps)) or float(fee_bps) < 0:

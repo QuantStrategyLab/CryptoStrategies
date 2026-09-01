@@ -138,7 +138,8 @@ def test_full_asset_replacement_has_unit_turnover() -> None:
     assert result.trade_log["turnover"].tolist() == pytest.approx([1.0, 1.0])
 
 
-def test_runner_rejects_conflicting_fee_aliases() -> None:
+@pytest.mark.parametrize(("fee_bps", "fee_rate"), [(10, 0.01), (0, 0.001)])
+def test_runner_rejects_conflicting_fee_aliases(fee_bps: float, fee_rate: float) -> None:
     panel = _panel([
         ("2024-01-01", "A", 100.0, 1.0),
         ("2024-01-02", "A", 100.0, 1.0),
@@ -148,7 +149,7 @@ def test_runner_rejects_conflicting_fee_aliases() -> None:
     runner = CryptoLivePoolBacktestRunner(panel=panel.set_index(["date", "symbol"]))
 
     with pytest.raises(ValueError, match="fee_rate and fee_bps disagree"):
-        runner.run(PROFILE_NAME, {"fee_bps": 10, "fee_rate": 0.01})
+        runner.run(PROFILE_NAME, {"fee_bps": fee_bps, "fee_rate": fee_rate})
 
 
 def test_runner_accepts_consistent_fee_aliases() -> None:
@@ -168,6 +169,31 @@ def test_runner_accepts_consistent_fee_aliases() -> None:
 
     assert both_result.total_return == pytest.approx(bps_result.total_return)
     pd.testing.assert_series_equal(both_aliases.last_daily_returns, fee_bps_only.last_daily_returns)
+
+
+def test_runner_preserves_missing_fee_aliases() -> None:
+    panel = _panel([
+        ("2024-01-01", "A", 100.0, 1.0),
+        ("2024-01-02", "A", 100.0, 1.0),
+        ("2024-01-03", "A", 100.0, 1.0),
+    ]).reset_index()
+    panel["date"] = pd.to_datetime(panel["date"])
+    indexed_panel = panel.set_index(["date", "symbol"])
+
+    fee_rate_only = CryptoLivePoolBacktestRunner(panel=indexed_panel)
+    fee_bps_only = CryptoLivePoolBacktestRunner(panel=indexed_panel)
+    default_fee = CryptoLivePoolBacktestRunner(panel=indexed_panel)
+    zero_fee = CryptoLivePoolBacktestRunner(panel=indexed_panel)
+
+    rate_result = fee_rate_only.run(PROFILE_NAME, {"fee_rate": 0.001})
+    bps_result = fee_bps_only.run(PROFILE_NAME, {"fee_bps": 10})
+    default_result = default_fee.run(PROFILE_NAME, {})
+    zero_result = zero_fee.run(PROFILE_NAME, {"fee_bps": 0})
+
+    assert rate_result.total_return == pytest.approx(bps_result.total_return)
+    assert default_result.total_return == pytest.approx(zero_result.total_return)
+    pd.testing.assert_series_equal(fee_rate_only.last_daily_returns, fee_bps_only.last_daily_returns)
+    pd.testing.assert_series_equal(default_fee.last_daily_returns, zero_fee.last_daily_returns)
 
 
 @pytest.mark.parametrize("final_open", [100.0, 200.0])
