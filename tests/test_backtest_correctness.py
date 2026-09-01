@@ -10,7 +10,11 @@ import pandas as pd
 import pytest
 
 from crypto_strategies.backtest.live_pool_simulator import run_live_pool_rotation_backtest
-from crypto_strategies.backtest.orchestrator_runner import _synthetic_panel
+from crypto_strategies.backtest.orchestrator_runner import (
+    PROFILE_NAME,
+    CryptoLivePoolBacktestRunner,
+    _synthetic_panel,
+)
 
 
 def _panel(rows: list[tuple[str, str, float, float]]) -> pd.DataFrame:
@@ -72,23 +76,57 @@ def test_weights_drift_and_cost_aggregates_are_mathematically_exact() -> None:
         slippage_bps=100,
     )
 
-    expected_returns = [0.49, 1.0 / 3.0, 0.495]
+    expected_returns = [0.48, 1.0 / 3.0, 0.495]
     assert result.returns.tolist() == pytest.approx(expected_returns)
 
-    # After +100% then +50% in A, actual weights drift 1/2 -> 2/3 -> 3/4.
-    # Rebalancing from (3/4, 1/4) to (1/2, 1/2) is half-L1 turnover 1/4.
-    assert result.trade_log["turnover"].tolist() == pytest.approx([0.5, 0.25])
-    assert result.trade_log["fee"].tolist() == pytest.approx([0.005, 0.0025])
-    assert result.trade_log["slippage"].tolist() == pytest.approx([0.005, 0.0025])
-    assert result.trade_log["cost"].tolist() == pytest.approx([0.01, 0.005])
+    # Initial funding from cash is full turnover. After +100% then +50% in A,
+    # weights drift 1/2 -> 2/3 -> 3/4; the second rebalance is half-L1 1/4.
+    assert result.trade_log["turnover"].tolist() == pytest.approx([1.0, 0.25])
+    assert result.trade_log["fee"].tolist() == pytest.approx([0.01, 0.0025])
+    assert result.trade_log["slippage"].tolist() == pytest.approx([0.01, 0.0025])
+    assert result.trade_log["cost"].tolist() == pytest.approx([0.02, 0.005])
 
-    expected_total_return = (1.49 * (4.0 / 3.0) * 1.495) - 1.0
+    expected_total_return = (1.48 * (4.0 / 3.0) * 1.495) - 1.0
     assert result.metrics["total_return"] == pytest.approx(expected_total_return)
     assert result.metrics["total_turnover"] == pytest.approx(result.trade_log["turnover"].sum())
     assert result.metrics["total_fees"] == pytest.approx(result.trade_log["fee"].sum())
     assert result.metrics["total_slippage"] == pytest.approx(result.trade_log["slippage"].sum())
     assert result.metrics["total_cost"] == pytest.approx(result.trade_log["cost"].sum())
-    assert result.metrics["Turnover"] == pytest.approx(0.75 / 3.0 * 365.25)
+    assert result.metrics["Turnover"] == pytest.approx(1.25 / 3.0 * 365.25)
+
+
+def test_full_cash_entry_and_exit_charge_full_turnover() -> None:
+    panel = pd.DataFrame(
+        [
+            {"date": "2024-01-01", "symbol": "A", "in_universe": True, "open": 100.0, "final_score": 1.0},
+            {"date": "2024-01-02", "symbol": "A", "in_universe": False, "open": 100.0, "final_score": 0.0},
+            {"date": "2024-01-03", "symbol": "A", "in_universe": False, "open": 100.0, "final_score": 0.0},
+        ]
+    ).set_index(["date", "symbol"])
+
+    result = run_live_pool_rotation_backtest(
+        panel,
+        top_n=1,
+        rebalance_every=1,
+        signal_lag_days=0,
+        fee_bps=100,
+    )
+
+    assert result.trade_log["turnover"].tolist() == pytest.approx([1.0, 1.0])
+    assert result.trade_log["fee"].tolist() == pytest.approx([0.01, 0.01])
+
+
+def test_runner_rejects_conflicting_fee_aliases() -> None:
+    panel = _panel([
+        ("2024-01-01", "A", 100.0, 1.0),
+        ("2024-01-02", "A", 100.0, 1.0),
+        ("2024-01-03", "A", 100.0, 1.0),
+    ]).reset_index()
+    panel["date"] = pd.to_datetime(panel["date"])
+    runner = CryptoLivePoolBacktestRunner(panel=panel.set_index(["date", "symbol"]))
+
+    with pytest.raises(ValueError, match="fee_rate and fee_bps disagree"):
+        runner.run(PROFILE_NAME, {"fee_bps": 10, "fee_rate": 0.01})
 
 
 @pytest.mark.parametrize("final_open", [100.0, 200.0])

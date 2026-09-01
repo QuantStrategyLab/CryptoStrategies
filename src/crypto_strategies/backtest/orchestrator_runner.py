@@ -195,11 +195,8 @@ class CryptoLivePoolBacktestRunner:
             top_n=int(params.get("top_n", 2)),
             rebalance_every=int(params.get("rebalance_every", 7)),
             signal_lag_days=int(params.get("signal_lag_days", params.get("signal_lag", 1))),
-            fee_bps=float(
-                params["fee_bps"]
-                if "fee_bps" in params
-                else float(params.get("fee_rate", 0.0)) * 10_000.0
-            ),
+            fee_bps=float(params.get("fee_bps", 0.0)),
+            fee_rate=float(params["fee_rate"]) if "fee_rate" in params else None,
             slippage_bps=float(params.get("slippage_bps", 0.0)),
         )
         self._last_daily_returns = _slice_daily_returns(

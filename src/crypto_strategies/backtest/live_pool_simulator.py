@@ -150,7 +150,12 @@ def run_live_pool_rotation_backtest(
                 weight = 1.0 / len(ranked)
                 for symbol in ranked.index:
                     target_weights.loc[symbol] = weight
-            turnover = float((target_weights - portfolio_weights).abs().sum() * 0.5)
+            previous_cash_weight = 1.0 - float(portfolio_weights.sum())
+            target_cash_weight = 1.0 - float(target_weights.sum())
+            turnover = float(
+                ((target_weights - portfolio_weights).abs().sum() + abs(target_cash_weight - previous_cash_weight))
+                * 0.5
+            )
             fee = turnover * fee_bps / 10_000.0
             slippage = turnover * slippage_bps / 10_000.0
             portfolio_weights = target_weights
