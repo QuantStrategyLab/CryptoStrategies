@@ -28,7 +28,7 @@ research = [
 requires-dist = [
     { name = "numpy", marker = "extra == 'research'", specifier = ">=1.26" },
     { name = "pandas", marker = "extra == 'research'", specifier = ">=2.0" },
-    { name = "quant-platform-kit", git = "https://github.com/QuantStrategyLab/QuantPlatformKit.git?rev=b13e28759a880dcb446dbfbc580dc032333b065e" },
+    { name = "quant-platform-kit", git = "https://github.com/QuantStrategyLab/QuantPlatformKit.git?rev=e7d8659ef5b8f66660ea58f58202735fa3508cc1" },
 ]
 provides-extras = ["research"]
 
@@ -182,7 +182,7 @@ wheels = [
 [[package]]
 name = "quant-platform-kit"
 version = "0.10.0"
-source = { git = "https://github.com/QuantStrategyLab/QuantPlatformKit.git?rev=b13e28759a880dcb446dbfbc580dc032333b065e#b13e28759a880dcb446dbfbc580dc032333b065e" }
+source = { git = "https://github.com/QuantStrategyLab/QuantPlatformKit.git?rev=e7d8659ef5b8f66660ea58f58202735fa3508cc1#e7d8659ef5b8f66660ea58f58202735fa3508cc1" }
 
 [[package]]
 name = "six"
