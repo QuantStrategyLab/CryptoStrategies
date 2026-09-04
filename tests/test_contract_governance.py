@@ -19,7 +19,7 @@ from crypto_strategies.runtime_adapters import (
     PLATFORM_RUNTIME_ADAPTERS,
     get_platform_runtime_adapter,
 )
-from quant_platform_kit.strategy_contracts import resolve_strategy_artifact_contract
+from quant_platform_kit.common.strategy_contracts import resolve_strategy_artifact_contract
 
 
 ALLOWED_TARGET_MODES = frozenset({"weight", "value"})

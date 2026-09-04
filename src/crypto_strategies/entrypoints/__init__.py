@@ -4,7 +4,7 @@ from collections.abc import Callable, Mapping
 from copy import deepcopy
 import math
 
-from quant_platform_kit.strategy_contracts import (
+from quant_platform_kit.common.strategy_contracts import (
     BudgetIntent,
     CallableStrategyEntrypoint,
     PositionTarget,
