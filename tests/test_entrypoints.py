@@ -8,7 +8,7 @@ from unittest.mock import patch
 from quant_platform_kit import PortfolioSnapshot, Position
 from quant_platform_kit.risk import gate as qpk_risk_gate
 from quant_platform_kit.risk.contracts import CandidateRiskIdentity
-from quant_platform_kit.strategy_contracts import StrategyContext
+from quant_platform_kit.common.strategy_contracts import StrategyContext
 from crypto_strategies import get_strategy_entrypoint
 
 

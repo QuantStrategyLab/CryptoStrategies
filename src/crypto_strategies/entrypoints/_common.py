@@ -10,7 +10,7 @@ from quant_platform_kit.risk.contracts import CandidateRiskIdentity
 from quant_platform_kit.risk.gate import assess_with_evidence as _qpk_assess_with_evidence
 from quant_platform_kit.risk.gate import enrich_decision_risk_diagnostics
 from quant_platform_kit.risk.portfolio_diagnostics import extract_portfolio_risk_diagnostics
-from quant_platform_kit.strategy_contracts import StrategyContext, StrategyDecision
+from quant_platform_kit.common.strategy_contracts import StrategyContext, StrategyDecision
 from quant_platform_kit.strategy_lifecycle.performance_monitor import PerformanceMonitor
 
 logger = logging.getLogger(__name__)

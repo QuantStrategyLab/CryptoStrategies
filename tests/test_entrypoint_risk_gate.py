@@ -10,7 +10,7 @@ from quant_platform_kit.risk.contracts import (
     RiskGateAssessment,
     RiskGateResult,
 )
-from quant_platform_kit.strategy_contracts import BudgetIntent, PositionTarget, StrategyContext, StrategyDecision
+from quant_platform_kit.common.strategy_contracts import BudgetIntent, PositionTarget, StrategyContext, StrategyDecision
 
 from crypto_strategies.entrypoints._common import apply_risk_gate
 

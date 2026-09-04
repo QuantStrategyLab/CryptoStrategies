@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from quant_platform_kit.common.strategies import resolve_catalog_profile
-from quant_platform_kit.strategy_contracts import (
+from quant_platform_kit.common.strategy_contracts import (
     StrategyArtifactContract,
     StrategyRuntimeAdapter,
     validate_strategy_runtime_adapter,
