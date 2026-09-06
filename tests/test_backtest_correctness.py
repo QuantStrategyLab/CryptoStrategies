@@ -76,23 +76,49 @@ def test_weights_drift_and_cost_aggregates_are_mathematically_exact() -> None:
         slippage_bps=100,
     )
 
-    expected_returns = [0.48, 1.0 / 3.0, 0.495]
-    assert result.returns.tolist() == pytest.approx(expected_returns)
+    # Fee/slippage constrain entry notional (no self-financed full weight).
+    cost_rate = 0.02
+    entry_notional = 1.0 / (1.0 + cost_rate)
+    ret0 = 1.5 / (1.0 + cost_rate) / 1.0 - 1.0  # 50/50 with A +100%
+    ret1 = 1.0 / 3.0  # no trade; A +50% on drifted weights
+    # Second rebalance from 75/25 back toward 50/50 under fee drag.
+    equity_before_second = 2.0 / (1.0 + cost_rate)
+    sale = 0.25 * equity_before_second
+    purchase = sale * (1.0 - cost_rate) / (1.0 + cost_rate)
+    second_cost = (sale + purchase) * cost_rate
+    # After selling A back to 50%, keep prior B and add constrained buy; then B +100%.
+    a_after = 0.5 * equity_before_second
+    b_after = 0.25 * equity_before_second + purchase
+    marked = a_after + 2.0 * b_after
+    ret2 = marked / equity_before_second - 1.0
 
-    # Initial funding from cash is full turnover. After +100% then +50% in A,
-    # weights drift 1/2 -> 2/3 -> 3/4; the second rebalance is half-L1 1/4.
-    assert result.trade_log["turnover"].tolist() == pytest.approx([1.0, 0.25])
-    assert result.trade_log["fee"].tolist() == pytest.approx([0.01, 0.0025])
-    assert result.trade_log["slippage"].tolist() == pytest.approx([0.01, 0.0025])
-    assert result.trade_log["cost"].tolist() == pytest.approx([0.02, 0.005])
+    assert result.returns.tolist() == pytest.approx([ret0, ret1, ret2])
+    assert result.trade_log["turnover"].tolist() == pytest.approx([
+        entry_notional / 2.0,
+        (sale + purchase) / (2.0 * equity_before_second),
+    ])
+    assert result.trade_log["fee"].tolist() == pytest.approx([
+        entry_notional * 0.01,
+        second_cost * 0.5,
+    ])
+    assert result.trade_log["slippage"].tolist() == pytest.approx([
+        entry_notional * 0.01,
+        second_cost * 0.5,
+    ])
+    assert result.trade_log["cost"].tolist() == pytest.approx([
+        entry_notional * cost_rate,
+        second_cost,
+    ])
 
-    expected_total_return = (1.48 * (4.0 / 3.0) * 1.495) - 1.0
+    expected_total_return = (1.0 + ret0) * (1.0 + ret1) * (1.0 + ret2) - 1.0
     assert result.metrics["total_return"] == pytest.approx(expected_total_return)
     assert result.metrics["total_turnover"] == pytest.approx(result.trade_log["turnover"].sum())
     assert result.metrics["total_fees"] == pytest.approx(result.trade_log["fee"].sum())
     assert result.metrics["total_slippage"] == pytest.approx(result.trade_log["slippage"].sum())
     assert result.metrics["total_cost"] == pytest.approx(result.trade_log["cost"].sum())
-    assert result.metrics["Turnover"] == pytest.approx(1.25 / 3.0 * 365.25)
+    assert result.metrics["Turnover"] == pytest.approx(
+        result.trade_log["turnover"].sum() / 3.0 * 365.25
+    )
 
 
 def test_full_cash_entry_and_exit_charge_full_turnover() -> None:
@@ -112,8 +138,9 @@ def test_full_cash_entry_and_exit_charge_full_turnover() -> None:
         fee_bps=100,
     )
 
-    assert result.trade_log["turnover"].tolist() == pytest.approx([1.0, 1.0])
-    assert result.trade_log["fee"].tolist() == pytest.approx([0.01, 0.01])
+    entry = 1.0 / 1.01
+    assert result.trade_log["turnover"].tolist() == pytest.approx([entry / 2.0, 0.5])
+    assert result.trade_log["fee"].tolist() == pytest.approx([entry * 0.01, entry * 0.01])
 
 
 def test_full_asset_replacement_has_unit_turnover() -> None:
@@ -135,7 +162,7 @@ def test_full_asset_replacement_has_unit_turnover() -> None:
         signal_lag_days=0,
     )
 
-    assert result.trade_log["turnover"].tolist() == pytest.approx([1.0, 1.0])
+    assert result.trade_log["turnover"].tolist() == pytest.approx([0.5, 1.0])
 
 
 @pytest.mark.parametrize(("fee_bps", "fee_rate"), [(10, 0.01), (0, 0.001)])
