@@ -115,8 +115,9 @@ def test_cash_after_exit_does_not_require_future_asset_prices() -> None:
 
     result = run_live_pool_rotation_backtest(panel, top_n=1, rebalance_every=1, fee_bps=100)
 
-    assert result.returns.tolist() == pytest.approx([-0.01, -0.01, 0.0])
-    assert result.trade_log["turnover"].tolist() == pytest.approx([1.0, 1.0, 0.0])
+    # Self-financed buy: equity drops by fee/(1+fee); turnover uses traded/(2*equity).
+    assert result.returns.tolist() == pytest.approx([-0.01 / 1.01, -0.01, 0.0])
+    assert result.trade_log["turnover"].tolist() == pytest.approx([0.5 / 1.01, 0.5, 0.0])
 
 
 def test_cash_before_late_selection_does_not_require_asset_prices() -> None:
@@ -128,7 +129,8 @@ def test_cash_before_late_selection_does_not_require_asset_prices() -> None:
     result = run_live_pool_rotation_backtest(panel, top_n=1, rebalance_every=1)
 
     assert result.returns.tolist() == [0.0, 0.0, 0.0]
-    assert result.trade_log["turnover"].tolist() == [0.0, 0.0, 1.0]
+    # One-way cash->asset deployment is half-turn under traded/(2*equity).
+    assert result.trade_log["turnover"].tolist() == [0.0, 0.0, 0.5]
 
 
 @pytest.mark.parametrize("signal_lag", [0, 1, 5])
