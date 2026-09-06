@@ -21,7 +21,7 @@ def test_drift_workflow_wires_real_pipeline_inputs_and_preflight_bundle() -> Non
     assert "repository: QuantStrategyLab/QuantPlatformKit" in workflow
     assert (
         "repository: QuantStrategyLab/QuantPlatformKit\n"
-        "          ref: aae333fe8b3fe5aeb32e1ff135ab14ea7db32420\n"
+        "          ref: c812ed70f83d61bdf1816fa5ca112b0f6976c6b6\n"
         "          path: external/QuantPlatformKit"
     ) in workflow
     assert "quant_platform_kit_ref: c812ed70f83d61bdf1816fa5ca112b0f6976c6b6" in workflow
@@ -34,7 +34,7 @@ def test_drift_workflow_wires_real_pipeline_inputs_and_preflight_bundle() -> Non
     assert "Upload lifecycle preflight artifact" in workflow
     assert "lifecycle-preflight-${{ github.run_id }}-${{ github.run_attempt }}" in workflow
     assert workflow.count("github.ref == format('refs/heads/{0}', github.event.repository.default_branch)") == 2
-    assert "uses: QuantStrategyLab/QuantPlatformKit/.github/workflows/reusable-drift-check.yml@33e506f1c89977f55f284d777fb5b748cfd30798" in workflow
+    assert "uses: QuantStrategyLab/QuantPlatformKit/.github/workflows/reusable-drift-check.yml@c812ed70f83d61bdf1816fa5ca112b0f6976c6b6" in workflow
     assert "strategy_domain: crypto" in workflow
     assert "snapshot_repository: QuantStrategyLab/CryptoLivePoolPipelines" in workflow
     assert "snapshot_checkout_path: external/CryptoLivePoolPipelines" in workflow
