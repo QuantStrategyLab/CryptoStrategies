@@ -28,6 +28,42 @@ def _panel() -> pd.DataFrame:
     return panel
 
 
+@pytest.mark.parametrize("day_index", [1, 2, 3])
+@pytest.mark.parametrize("cash_only", [False, True])
+def test_internal_missing_date_is_not_compressed(day_index: int, cash_only: bool) -> None:
+    panel = _panel()
+    if cash_only:
+        panel.loc[:, "in_universe"] = False
+    day = panel.index.get_level_values("date").unique()[day_index]
+    panel = panel.drop(index=day, level="date")
+
+    with pytest.raises(ValueError, match="panel dates must be consecutive calendar days"):
+        run_live_pool_rotation_backtest(panel, top_n=1)
+
+
+@pytest.mark.parametrize("cash_only", [False, True])
+def test_complete_daily_panel_keeps_existing_cash_and_invested_behavior(cash_only: bool) -> None:
+    panel = _panel()
+    if cash_only:
+        panel.loc[:, "in_universe"] = False
+        panel.loc[:, "open"] = np.nan
+
+    result = run_live_pool_rotation_backtest(panel, top_n=1)
+
+    assert result.returns.tolist() == ([] if cash_only else [0.0, 0.0, 0.0])
+
+
+def test_late_listed_unselected_symbol_does_not_make_a_global_date_gap() -> None:
+    panel = _panel()
+    dates = panel.index.get_level_values("date").unique()
+    panel = panel.drop(index=[(day, "B") for day in dates[:2]])
+
+    result = run_live_pool_rotation_backtest(panel, top_n=1)
+
+    assert result.returns.index.tolist() == dates[1:-1].tolist()
+    assert result.returns.tolist() == [0.0, 0.0, 0.0]
+
+
 @pytest.mark.parametrize("bad_open", [np.nan, np.inf, -np.inf, 0.0, -1.0])
 @pytest.mark.parametrize("day_index", [1, 2, 4], ids=["entry", "held", "terminal"])
 def test_required_open_must_be_finite_and_positive(bad_open: float, day_index: int) -> None:
