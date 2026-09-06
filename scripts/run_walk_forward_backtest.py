@@ -95,7 +95,7 @@ def _normalize_panel(panel: pd.DataFrame) -> pd.DataFrame:
     frame["open"] = pd.to_numeric(frame["open"], errors="coerce")
     frame["final_score"] = pd.to_numeric(frame["final_score"], errors="coerce")
     frame["in_universe"] = frame["in_universe"].astype(str).str.lower().isin({"true", "1"})
-    frame = frame.dropna(subset=["date", "symbol", "open"])
+    frame = frame.dropna(subset=["date", "symbol"])
     if frame.duplicated(["date", "symbol"]).any():
         raise ValueError("research panel contains duplicate date/symbol rows")
     return frame.set_index(["date", "symbol"]).sort_index()

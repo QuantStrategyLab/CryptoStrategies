@@ -84,6 +84,8 @@ def run_live_pool_rotation_backtest(
     A score observed on ``signal_date`` is tradable at ``effective_date`` after
     ``signal_lag`` rows; returns are measured from that effective open to the
     next open. Costs are charged on half-L1 turnover at each rebalance.
+    Required execution and valuation opens must be finite and positive; missing
+    prices on unexposed assets do not invalidate a cash or invested period.
     """
     if int(top_n) <= 0:
         raise ValueError("top_n must be positive")
@@ -123,7 +125,6 @@ def run_live_pool_rotation_backtest(
         .reindex(index=dates, columns=symbols)
         .astype(float)
     )
-    open_returns = open_matrix.shift(-1).div(open_matrix).sub(1.0).fillna(0.0)
 
     portfolio_weights = pd.Series(0.0, index=symbols, dtype=float)
     daily_returns: list[float] = []
@@ -137,6 +138,7 @@ def run_live_pool_rotation_backtest(
     ):
         signal_idx = effective_idx - signal_lag
         signal_date = dates[signal_idx]
+        held = portfolio_weights.ne(0.0)
         turnover = 0.0
         fee = 0.0
         slippage = 0.0
@@ -172,7 +174,18 @@ def run_live_pool_rotation_backtest(
                 }
             )
 
-        gross_return = float((portfolio_weights * open_returns.loc[effective_date]).sum())
+        exposed = portfolio_weights.ne(0.0)
+        # Exiting assets need this open, but only retained/new assets need the next.
+        current_prices = open_matrix.loc[effective_date, held | exposed]
+        next_prices = open_matrix.iloc[effective_idx + 1].loc[exposed]
+        required_prices = pd.concat([current_prices, next_prices])
+        if not (np.isfinite(required_prices) & required_prices.gt(0.0)).all():
+            raise ValueError("required open prices must be finite and positive")
+        open_returns = (
+            next_prices.div(open_matrix.loc[effective_date, exposed]).sub(1.0)
+            .reindex(symbols, fill_value=0.0)
+        )
+        gross_return = float((portfolio_weights * open_returns).sum())
         cost = fee + slippage
         if cost >= 1.0:
             raise ValueError("transaction cost must be less than 1.0")
@@ -185,7 +198,7 @@ def run_live_pool_rotation_backtest(
         daily_slippage.append(slippage)
         gross_growth = 1.0 + gross_return
         portfolio_weights = (
-            portfolio_weights.mul(1.0 + open_returns.loc[effective_date])
+            portfolio_weights.mul(1.0 + open_returns)
             .div(gross_growth)
             .fillna(0.0)
             if gross_growth > 0.0

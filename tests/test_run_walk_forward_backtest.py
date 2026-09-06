@@ -188,3 +188,72 @@ def test_normalized_panel_preserves_unscored_open_rows() -> None:
 
     assert len(normalized) == 1
     assert pd.isna(normalized.iloc[0]["final_score"])
+
+
+@pytest.mark.parametrize("opening", [None, "unavailable"])
+def test_normalized_panel_preserves_missing_prices_but_still_drops_invalid_dates(opening) -> None:
+    panel = pd.DataFrame([
+        {"date": "2024-01-01", "symbol": " a ", "in_universe": True, "open": opening, "final_score": 1},
+        {"date": "invalid", "symbol": "B", "in_universe": True, "open": opening, "final_score": 1},
+    ])
+
+    normalized = _normalize_panel(panel)
+
+    assert normalized.index.tolist() == [(pd.Timestamp("2024-01-01"), "A")]
+    assert pd.isna(normalized.iloc[0]["open"])
+
+
+@pytest.mark.parametrize("opening", [None, "unavailable"])
+def test_cli_rejects_whole_missing_price_day_without_success_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture, opening,
+) -> None:
+    dates = pd.date_range(walk_forward.DEFAULT_WINDOWS[0][0], walk_forward.DEFAULT_WINDOWS[-1][1])
+    panel = pd.DataFrame([
+        {"date": day, "symbol": symbol, "in_universe": True, "open": 100.0, "final_score": score}
+        for day in dates
+        for symbol, score in [("BTCUSDT", 3), ("ETHUSDT", 2), ("SOLUSDT", 1)]
+    ])
+    history = panel.loc[panel["symbol"].isin(["BTCUSDT", "ETHUSDT"]), ["date", "symbol", "open"]]
+    history = history.rename(columns={"open": "close"})
+    panel["open"] = panel["open"].astype(object)
+    panel.loc[panel["date"] == dates[40], "open"] = opening
+    panel_path = tmp_path / "panel.csv"
+    history_path = tmp_path / "history.csv"
+    output_path = tmp_path / "result.json"
+    returns_path = tmp_path / "returns.csv"
+    store = tmp_path / "store"
+    panel.to_csv(panel_path, index=False)
+    history.to_csv(history_path, index=False)
+    monkeypatch.setattr(sys, "argv", [
+        "run_walk_forward_backtest.py", "--panel", str(panel_path),
+        "--market-history", str(history_path), "--store-root", str(store),
+        "--json-output", str(output_path), "--returns-output", str(returns_path),
+    ])
+
+    with pytest.raises(ValueError, match="required open prices must be finite and positive"):
+        walk_forward.main()
+
+    assert not output_path.exists()
+    assert not returns_path.exists()
+    assert not list(store.rglob("*.json"))
+    assert not capsys.readouterr().out
+
+
+@pytest.mark.parametrize("cash_first", [False, True])
+def test_normalized_missing_unexposed_prices_preserve_runner_periods(cash_first: bool) -> None:
+    dates = pd.date_range("2024-01-01", periods=5)
+    panel = pd.DataFrame([
+        {"date": day, "symbol": symbol, "in_universe": True, "open": 100.0, "final_score": score}
+        for day in dates for symbol, score in [("A", 1), ("B", 0)]
+    ])
+    panel.loc[panel["symbol"] == "B", "open"] = float("nan")
+    if cash_first:
+        panel.loc[panel["date"] < dates[2], "in_universe"] = False
+        panel.loc[panel["date"] < dates[3], "open"] = float("nan")
+    runner = orchestrator_runner.CryptoLivePoolBacktestRunner(panel=_normalize_panel(panel))
+
+    result = runner.run("crypto_live_pool_rotation", {"top_n": 1, "rebalance_every": 1})
+
+    assert result.observation_count == 3
+    assert runner.last_daily_returns.index.tolist() == dates[1:-1].tolist()
+    assert runner.last_daily_returns.tolist() == [0.0, 0.0, 0.0]
