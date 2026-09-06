@@ -24,7 +24,7 @@ def test_drift_workflow_wires_real_pipeline_inputs_and_preflight_bundle() -> Non
         "          ref: aae333fe8b3fe5aeb32e1ff135ab14ea7db32420\n"
         "          path: external/QuantPlatformKit"
     ) in workflow
-    assert "quant_platform_kit_ref: cd6edbb32bb85ec6d280c2dafea4dd8ecd3ccdab" in workflow
+    assert "quant_platform_kit_ref: c812ed70f83d61bdf1816fa5ca112b0f6976c6b6" in workflow
     assert "python -m pip install --no-deps -e external/QuantPlatformKit" in workflow
     assert "scripts/run_walk_forward_backtest.py" in workflow
     assert '"--list-profiles"' in workflow
