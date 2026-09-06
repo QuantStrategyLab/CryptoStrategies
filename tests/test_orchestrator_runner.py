@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import math
+
+import pandas as pd
+
 import tempfile
 import unittest
 from datetime import date
@@ -117,6 +121,71 @@ class CryptoEquityComboBacktestRunnerTests(unittest.TestCase):
             )
             self.assertEqual(len(results), 2)
             self.assertTrue(all(item.strategy_profile == CRYPTO_EQUITY_COMBO_PROFILE for item in results))
+
+
+
+class AccountingMetricsRegressionTests(unittest.TestCase):
+    """QSL-20260906-006 / 007: initial NAV drawdown + fee-constrained share ledger."""
+
+    def test_max_drawdown_includes_initial_nav(self) -> None:
+        from crypto_strategies.backtest.live_pool_simulator import _performance_metrics
+
+        cases = (
+            ([-0.1], -0.1),
+            ([-0.1, 0.0], -0.1),
+            ([-0.1, 0.1], -0.1),
+            ([0.1, -0.2], -0.2),
+        )
+        for returns, expected in cases:
+            with self.subTest(returns=returns):
+                metrics = _performance_metrics(pd.Series(returns, dtype=float))
+                self.assertAlmostEqual(metrics["Max Drawdown"], expected)
+
+    def test_cash_entry_fee_constrains_buyable_shares(self) -> None:
+        from crypto_strategies.backtest.live_pool_simulator import run_live_pool_rotation_backtest
+
+        panel = pd.DataFrame(
+            [
+                {"date": "2024-01-01", "symbol": "A", "in_universe": True, "open": 100.0, "final_score": 1.0},
+                {"date": "2024-01-02", "symbol": "A", "in_universe": True, "open": 100.0, "final_score": 1.0},
+                {"date": "2024-01-03", "symbol": "A", "in_universe": True, "open": 110.0, "final_score": 1.0},
+            ]
+        )
+        panel["date"] = pd.to_datetime(panel["date"])
+        panel = panel.set_index(["date", "symbol"])
+        result = run_live_pool_rotation_backtest(
+            panel, top_n=1, rebalance_every=1, fee_bps=100, slippage_bps=0.0
+        )
+        # Buyable notional is 1/1.01; +10% mark => 1.1/1.01 - 1.
+        self.assertAlmostEqual(float(result.returns.iloc[0]), 1.1 / 1.01 - 1.0)
+        self.assertAlmostEqual(float(result.trade_log.loc[0, "fee"]), 0.01 / 1.01)
+        self.assertAlmostEqual(float(result.trade_log.loc[0, "turnover"]), 0.5 / 1.01)
+
+    def test_no_trade_days_drift_without_self_financing(self) -> None:
+        from crypto_strategies.backtest.live_pool_simulator import run_live_pool_rotation_backtest
+
+        panel = pd.DataFrame(
+            [
+                {"date": "2024-01-01", "symbol": "A", "in_universe": True, "open": 100.0, "final_score": 1.0},
+                {"date": "2024-01-01", "symbol": "B", "in_universe": True, "open": 100.0, "final_score": 0.0},
+                {"date": "2024-01-02", "symbol": "A", "in_universe": True, "open": 100.0, "final_score": 1.0},
+                {"date": "2024-01-02", "symbol": "B", "in_universe": True, "open": 100.0, "final_score": 0.0},
+                {"date": "2024-01-03", "symbol": "A", "in_universe": True, "open": 200.0, "final_score": 1.0},
+                {"date": "2024-01-03", "symbol": "B", "in_universe": True, "open": 100.0, "final_score": 0.0},
+                {"date": "2024-01-04", "symbol": "A", "in_universe": True, "open": 100.0, "final_score": 1.0},
+                {"date": "2024-01-04", "symbol": "B", "in_universe": True, "open": 100.0, "final_score": 0.0},
+            ]
+        )
+        panel["date"] = pd.to_datetime(panel["date"])
+        panel = panel.set_index(["date", "symbol"])
+        result = run_live_pool_rotation_backtest(
+            panel, top_n=2, rebalance_every=7, fee_bps=0.0
+        )
+        # Equal-weight: +0.5 then -1/3, terminal equity returns to 1.
+        self.assertEqual(len(result.returns), 2)
+        self.assertAlmostEqual(float(result.returns.iloc[0]), 0.5)
+        self.assertAlmostEqual(float(result.returns.iloc[1]), -1.0 / 3.0)
+        self.assertAlmostEqual(float((1.0 + result.returns).prod()), 1.0)
 
 
 if __name__ == "__main__":
