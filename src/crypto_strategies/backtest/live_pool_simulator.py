@@ -114,6 +114,8 @@ def run_live_pool_rotation_backtest(
     fee_bps = float(fee_bps)
     slippage_bps = float(slippage_bps)
     dates = sorted(panel.index.get_level_values("date").unique())
+    if dates and not pd.DatetimeIndex(dates).equals(pd.date_range(dates[0], dates[-1], freq="D")):
+        raise ValueError("panel dates must be consecutive calendar days")
     symbols = sorted(panel.loc[panel["in_universe"]].index.get_level_values("symbol").unique())
     if not dates or not symbols:
         empty = pd.Series(dtype=float)
