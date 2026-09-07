@@ -16,6 +16,7 @@ from crypto_strategies.backtest.orchestrator_runner import (
     SUPPORTED_PROFILES,
     CryptoEquityComboBacktestRunner,
     CryptoLivePoolBacktestRunner,
+    _metrics_to_result,
     build_backtest_runner,
 )
 from crypto_strategies.strategies.crypto_equity_combo import PROFILE_NAME as CRYPTO_EQUITY_COMBO_PROFILE
@@ -126,6 +127,22 @@ class CryptoEquityComboBacktestRunnerTests(unittest.TestCase):
 
 class AccountingMetricsRegressionTests(unittest.TestCase):
     """QSL-20260906-006 / 007: initial NAV drawdown + fee-constrained share ledger."""
+
+    def test_calmar_keeps_cagr_sign_for_live_pool_and_combo(self) -> None:
+        cases = ((-0.1, -0.2, -0.5), (0.1, -0.2, 0.5), (0.0, -0.2, 0.0), (0.1, 0.0, None))
+        for profile in (PROFILE_NAME, CRYPTO_EQUITY_COMBO_PROFILE):
+            for cagr, max_drawdown, expected in cases:
+                with self.subTest(profile=profile, cagr=cagr, max_drawdown=max_drawdown):
+                    result = _metrics_to_result(
+                        strategy_profile=profile,
+                        params={},
+                        metrics={"CAGR": cagr, "Max Drawdown": max_drawdown},
+                        start_date=date(2024, 1, 1),
+                        end_date=date(2024, 12, 31),
+                        run_duration_seconds=0.0,
+                    )
+                    self.assertEqual(result.calmar_ratio, expected)
+                    self.assertIsNone(result.validation_identity)
 
     def test_max_drawdown_includes_initial_nav(self) -> None:
         from crypto_strategies.backtest.live_pool_simulator import _performance_metrics
