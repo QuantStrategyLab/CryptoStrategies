@@ -14,7 +14,7 @@ dependencies = [
 
 [project.optional-dependencies]
 research = [
-  "numpy>=1.26",
+  "numpy>=2.4.6",
   "pandas>=3.0.5",
 ]
 
