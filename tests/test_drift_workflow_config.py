@@ -4,6 +4,10 @@ from pathlib import Path
 def test_drift_workflow_wires_real_pipeline_inputs_and_preflight_bundle() -> None:
     workflow = (Path(__file__).resolve().parents[1] / ".github" / "workflows" / "drift-check.yml").read_text(encoding="utf-8")
 
+    assert "preflight_only:" in workflow
+    assert "type: boolean" in workflow
+    assert "default: false" in workflow
+    assert "inputs.preflight_only != true" in workflow
     assert "preflight_backtests:" in workflow
     assert "needs: preflight_backtests" in workflow
     assert "snapshot_repository_ref: ${{ steps.snapshot-input.outputs.snapshot_repository_ref }}" in workflow
