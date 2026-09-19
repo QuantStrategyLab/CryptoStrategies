@@ -3,7 +3,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-QPK_REVISION = "04721b1cce003b2f070e707493ff32c6cdb1b82b"
+QPK_REVISION = "8e8ec51884bf8abb0a7ca699fc2da39fad134f89"
 QPK_URL = (
     "quant-platform-kit @ git+https://github.com/QuantStrategyLab/"
     f"QuantPlatformKit.git@{QPK_REVISION}"
