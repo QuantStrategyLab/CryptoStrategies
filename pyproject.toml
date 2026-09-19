@@ -9,7 +9,7 @@ description = "Shared crypto strategy catalog and implementations"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-  "quant-platform-kit @ git+https://github.com/QuantStrategyLab/QuantPlatformKit.git@c812ed70f83d61bdf1816fa5ca112b0f6976c6b6",
+  "quant-platform-kit @ git+https://github.com/QuantStrategyLab/QuantPlatformKit.git@04721b1cce003b2f070e707493ff32c6cdb1b82b",
 ]
 
 [project.optional-dependencies]

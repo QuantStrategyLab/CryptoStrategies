@@ -31,6 +31,8 @@ DEFAULT_WINDOWS: tuple[tuple[date, date], ...] = (
 )
 DEFAULT_STORE_ROOT = Path("/tmp/crypto_wf_store")
 DRIFT_BASELINE_HORIZON_DAYS = 126
+CRYPTO_PERIODS_PER_YEAR = 365.25
+CRYPTO_CALENDAR_ID = "CRYPTO_NATURAL_DAY"
 
 PROFILE_DEFAULTS: dict[str, dict[str, Any]] = {
     PROFILE_NAME: {"min_history_days": DEFAULT_MIN_HISTORY_DAYS, "top_n": 2, "rebalance_every": 7},
@@ -191,7 +193,12 @@ def _write_return_matrix(
 
 def _baseline_from_return_tail(full_result: Any, returns: pd.Series) -> Any:
     tail = returns.tail(DRIFT_BASELINE_HORIZON_DAYS)
-    metrics = compute_window_metrics(tail, window_days=DRIFT_BASELINE_HORIZON_DAYS)
+    metrics = compute_window_metrics(
+        tail,
+        window_days=DRIFT_BASELINE_HORIZON_DAYS,
+        periods_per_year=CRYPTO_PERIODS_PER_YEAR,
+        calendar_id=CRYPTO_CALENDAR_ID,
+    )
     max_drawdown = float(metrics.max_drawdown)
     cagr = float(metrics.cagr)
     return replace(
@@ -206,6 +213,8 @@ def _baseline_from_return_tail(full_result: Any, returns: pd.Series) -> Any:
         start_date=metrics.start_date,
         end_date=metrics.end_date,
         observation_count=metrics.observation_count,
+        periods_per_year=metrics.periods_per_year,
+        calendar_id=metrics.calendar_id,
     )
 
 
