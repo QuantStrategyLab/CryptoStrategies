@@ -24,6 +24,8 @@ DEFAULT_MIN_HISTORY_DAYS = 120
 COMBO_DEFAULT_MIN_HISTORY_DAYS = 260
 SUPPORTED_PROFILES = frozenset({PROFILE_NAME, CRYPTO_EQUITY_COMBO_PROFILE})
 SYNTHETIC_PANEL_GENERATOR_VERSION = "crypto_live_pool_panel.v2"
+CRYPTO_PERIODS_PER_YEAR = 365.25
+CRYPTO_CALENDAR_ID = "CRYPTO_NATURAL_DAY"
 
 
 def _synthetic_digest_int(*parts: str) -> int:
@@ -144,6 +146,8 @@ def _metrics_to_result(
         source_script="crypto_strategies.backtest.orchestrator_runner",
         computed_at=datetime.now(timezone.utc).isoformat(),
         run_duration_seconds=run_duration_seconds,
+        periods_per_year=CRYPTO_PERIODS_PER_YEAR,
+        calendar_id=CRYPTO_CALENDAR_ID,
     )
 
 
