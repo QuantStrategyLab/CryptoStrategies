@@ -19,13 +19,15 @@
 - `portfolio_snapshot`
 - `universe_snapshot`
 
-当前 live 策略里的含义是：
+当前主 snapshot-backed profile（`crypto_live_pool_rotation`）里的含义是：
 
 - `market_prices`：按 symbol 组织的最新可交易价格
 - `derived_indicators`：按 symbol 组织的策略级趋势指标
 - `benchmark_snapshot`：基准状态快照，当前是 BTC
 - `portfolio_snapshot`：与交易所无关的组合和现金快照
 - `universe_snapshot`：来自已验证 `CryptoLivePoolPipelines` artifact 的本轮官方有序 live-pool 标的集合
+
+消费该上游 live-pool artifact 只是数据来源契约，不表示该 profile 已进入 runtime allowlist，也不表示已获晋级/live runtime 授权。
 
 ## target mode
 
@@ -82,9 +84,7 @@
 
 ## 当前落地状态
 
-现在只有一条 live profile：
-
-- `crypto_live_pool_rotation`
+`crypto_live_pool_rotation` 是本仓库主 snapshot-backed 加密 profile。目录状态为 `research_backtest_only`，runtime selectable allowlist 为空，因此当前**没有** live runtime grant，也没有晋级授权。上文保留的上游 live-pool artifact 消费边界只说明数据来源，不构成 runtime 启用声明。
 
 现在也只有一个平台 adapter：
 
