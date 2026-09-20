@@ -36,11 +36,11 @@ CryptoStrategies 是 QuantStrategyLab 的加密货币策略包。为 Binance 执
 
 ### Snapshot-backed 策略
 
-这些 profile 依赖 `CryptoLivePoolPipelines` 生成的 artifact；下游平台使用前，应先确认对应产物已经验证和提升。
+这些 profile 依赖 `CryptoLivePoolPipelines` 生成的 artifact；下游平台若要消费，应先确认对应产物已经验证。artifact 可用不等于已获 runtime allowlist / 晋级 / live 授权。
 
 | Profile | 名称 | 说明 |
 | --- | --- | --- |
-| `crypto_live_pool_rotation` | 加密领涨轮动 | 消费 CryptoLivePoolPipelines 发布的有序 live pool 的趋势轮动策略。兼容旧 profile `crypto_leader_rotation`；运行时代码可以在该池内做交易门控和仓位 sizing，但月度选池和排序属于上游。 |
+| `crypto_live_pool_rotation` | 加密领涨轮动 | 目录状态为 `research_backtest_only` 的趋势轮动策略；以 CryptoLivePoolPipelines 发布的有序 live pool 为数据来源。兼容旧 profile `crypto_leader_rotation`；运行时代码可以在该池内做交易门控和仓位 sizing，但月度选池和排序属于上游。当前 runtime selectable allowlist 为空，**没有** live runtime grant 或晋级授权；消费上游 live-pool artifact 不等于已被 runtime 启用。 |
 
 ### 研究侧候选
 

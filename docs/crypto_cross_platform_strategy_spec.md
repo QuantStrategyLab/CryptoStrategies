@@ -19,13 +19,15 @@ New crypto profiles must declare `required_inputs` from this canonical set only:
 - `portfolio_snapshot`
 - `universe_snapshot`
 
-Current meaning for the live profile:
+Current meaning for the primary snapshot-backed profile (`crypto_live_pool_rotation`):
 
 - `market_prices`: latest tradable prices keyed by symbol
 - `derived_indicators`: strategy-ready trend metrics keyed by symbol
 - `benchmark_snapshot`: benchmark regime snapshot, currently BTC
 - `portfolio_snapshot`: exchange-agnostic portfolio and cash snapshot
 - `universe_snapshot`: ordered official live-pool symbols from the validated `CryptoLivePoolPipelines` artifact for this cycle
+
+Consuming that upstream live-pool artifact is a data-source contract only. It does not mean the profile is on the runtime allowlist or has promotion/live runtime authorization.
 
 ## Target mode
 
@@ -84,9 +86,7 @@ Forbidden inside strategy code:
 
 ## Current rollout
 
-Today only one profile is live:
-
-- `crypto_live_pool_rotation`
+`crypto_live_pool_rotation` is the primary snapshot-backed crypto profile in this package. Catalog status is `research_backtest_only`, and the runtime selectable allowlist is empty, so it does **not** currently hold a live runtime grant or promotion authorization. Upstream live-pool artifact consumption remains the data-source boundary described above; it is not a runtime enablement claim.
 
 Today only one platform adapter exists:
 
