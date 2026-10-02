@@ -2,13 +2,19 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
 
-from crypto_strategies.backtest.live_pool_simulator import LivePoolBacktestResult, _performance_metrics
+from crypto_strategies.backtest.live_pool_simulator import (
+    LivePoolBacktestResult,
+    _cashflow_accounting_metrics,
+    _cashflow_adjusted_returns,
+    _performance_metrics,
+)
 from crypto_strategies.strategies.crypto_equity_combo import (
     DEFAULT_BTC_WEIGHT,
     DEFAULT_TREND_WEIGHT,
@@ -65,11 +71,11 @@ def _compute_sma(series: pd.Series, window: int) -> pd.Series:
     return series.rolling(window=window, min_periods=window).mean()
 
 
-def _combo_daily_returns(
+def _combo_simulation(
     close: pd.DataFrame,
     *,
     combo_config: CryptoComboBacktestConfig,
-) -> pd.Series:
+) -> tuple[pd.Series, pd.Series, pd.Series]:
     btc_col = BTC_SYMBOL if BTC_SYMBOL in close.columns else close.columns[0]
     eth_col = ETH_SYMBOL if ETH_SYMBOL in close.columns else close.columns[min(1, len(close.columns) - 1)]
 
@@ -77,7 +83,8 @@ def _combo_daily_returns(
     eth_close = close[eth_col].dropna()
     idx = btc_close.index.intersection(eth_close.index).sort_values()
     if len(idx) < combo_config.min_history_days:
-        return pd.Series(dtype=float)
+        empty = pd.Series(dtype=float)
+        return empty, empty, empty
 
     eth_returns = eth_close.pct_change().dropna()
     alt_returns = _simulate_alt_returns(eth_returns.reindex(idx).fillna(0.0))
@@ -103,6 +110,7 @@ def _combo_daily_returns(
         )
 
     portfolio_values: list[float] = []
+    external_flows: list[float] = []
     alt_positions: dict[str, float] = {}
     btc_units = 0.0
     cash_held = 0.0
@@ -119,6 +127,9 @@ def _combo_daily_returns(
         btc_alloc = combo_config.dca_amount_usd * combo_config.btc_weight
         trend_alloc = combo_config.dca_amount_usd * trend_weight
         btc_units += (btc_alloc + extra_btc_alloc) / btc_p
+        cash_held += combo_config.dca_amount_usd * (
+            1.0 - combo_config.btc_weight - combo_config.trend_weight
+        )
 
         alt_prices_today: dict[str, float] = {}
         alt_candidates: list[str] = []
@@ -144,9 +155,20 @@ def _combo_daily_returns(
             for alt in ALTS
         )
         portfolio_values.append(btc_value + alt_value + cash_held)
+        external_flows.append(combo_config.dca_amount_usd)
 
     equity = pd.Series(portfolio_values, index=idx)
-    return equity.pct_change().fillna(0.0)
+    flows = pd.Series(external_flows, index=idx, dtype=float)
+    returns = _cashflow_adjusted_returns(equity, flows, flow_timing="end")
+    return returns, equity, flows
+
+
+def _combo_daily_returns(
+    close: pd.DataFrame,
+    *,
+    combo_config: CryptoComboBacktestConfig,
+) -> pd.Series:
+    return _combo_simulation(close, combo_config=combo_config)[0]
 
 
 def run_combo_backtest(
@@ -156,14 +178,46 @@ def run_combo_backtest(
     universe_symbols: Any = None,
 ) -> LivePoolBacktestResult:
     combo = combo_config or CryptoComboBacktestConfig()
+    if not math.isfinite(float(combo.dca_amount_usd)) or combo.dca_amount_usd <= 0.0:
+        raise ValueError("dca_amount_usd must be finite and positive")
+    weights = (float(combo.btc_weight), float(combo.trend_weight))
+    if any(not math.isfinite(weight) or weight < 0.0 for weight in weights):
+        raise ValueError("btc_weight and trend_weight must be finite and non-negative")
+    if sum(weights) > 1.0:
+        raise ValueError("btc_weight and trend_weight must sum to at most 1.0")
+    if (
+        not math.isfinite(float(combo.dynamic_trend_cut))
+        or not 0.0 <= float(combo.dynamic_trend_cut) <= 1.0
+    ):
+        raise ValueError("dynamic_trend_cut must be finite and between 0.0 and 1.0")
     symbols = tuple(universe_symbols or (BTC_SYMBOL, ETH_SYMBOL))
     close = build_close_matrix(market_history, symbols=symbols)
     if len(close) < int(combo.min_history_days):
         raise ValueError(
             f"market_history requires at least {int(combo.min_history_days)} overlapping trading days"
         )
-    returns = _combo_daily_returns(close, combo_config=combo)
-    return LivePoolBacktestResult(metrics=_performance_metrics(returns), returns=returns)
+    returns, equity, flows = _combo_simulation(close, combo_config=combo)
+    accounting = _cashflow_accounting_metrics(
+        equity,
+        flows,
+        initial_equity=0.0,
+    )
+    metrics = _performance_metrics(returns)
+    accounting["TWR_total_return"] = float((1.0 + returns).prod() - 1.0)
+    accounting["TWR_CAGR"] = float(metrics["CAGR"])
+    accounting["TWR_Sharpe"] = float(metrics["Sharpe"])
+    metrics.update({key: value for key, value in accounting.items() if isinstance(value, float)})
+    if accounting["xirr"] is not None:
+        metrics["XIRR"] = float(accounting["xirr"])
+    return LivePoolBacktestResult(
+        metrics=metrics,
+        returns=returns,
+        cost_status="not_modelled",
+        accounting_status=str(accounting["status"]),
+        accounting=accounting,
+        equity=equity,
+        external_flows=flows,
+    )
 
 
 __all__ = [

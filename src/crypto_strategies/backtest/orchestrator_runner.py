@@ -10,7 +10,12 @@ import numpy as np
 import pandas as pd
 
 from crypto_strategies.backtest.combo_simulator import ComboMode, CryptoComboBacktestConfig, run_combo_backtest
-from crypto_strategies.backtest.live_pool_simulator import _performance_metrics, run_live_pool_rotation_backtest
+from crypto_strategies.backtest.live_pool_simulator import (
+    _cashflow_accounting_metrics,
+    _cashflow_adjusted_returns,
+    _performance_metrics,
+    run_live_pool_rotation_backtest,
+)
 from crypto_strategies.strategies.crypto_equity_combo import PROFILE_NAME as CRYPTO_EQUITY_COMBO_PROFILE
 
 try:
@@ -122,6 +127,7 @@ def _metrics_to_result(
     start_date: date | None,
     end_date: date | None,
     run_duration_seconds: float,
+    cost_model: str = "",
 ) -> Any:
     if BacktestResult is None:
         raise ImportError("quant_platform_kit is required to build BacktestResult")
@@ -146,6 +152,7 @@ def _metrics_to_result(
         source_script="crypto_strategies.backtest.orchestrator_runner",
         computed_at=datetime.now(timezone.utc).isoformat(),
         run_duration_seconds=run_duration_seconds,
+        cost_model=cost_model,
         periods_per_year=CRYPTO_PERIODS_PER_YEAR,
         calendar_id=CRYPTO_CALENDAR_ID,
     )
@@ -234,6 +241,8 @@ class CryptoEquityComboBacktestRunner:
         self._synthetic_days = int(synthetic_days)
         self._last_daily_returns = pd.Series(dtype=float)
         self._run_return_history: list[pd.Series] = []
+        self._last_accounting_metrics: dict[str, Any] = {}
+        self._cost_status = "not_modelled"
 
     @property
     def last_daily_returns(self) -> pd.Series:
@@ -242,6 +251,14 @@ class CryptoEquityComboBacktestRunner:
     @property
     def run_return_history(self) -> tuple[pd.Series, ...]:
         return tuple(item.copy() for item in self._run_return_history)
+
+    @property
+    def last_accounting_metrics(self) -> dict[str, Any]:
+        return dict(self._last_accounting_metrics)
+
+    @property
+    def cost_status(self) -> str:
+        return self._cost_status
 
     def run(
         self,
@@ -283,10 +300,38 @@ class CryptoEquityComboBacktestRunner:
                 min_history_days=min_history_days,
             ),
         )
-        self._last_daily_returns = _slice_daily_returns(
-            result.returns,
-            start_date=start_date,
-            end_date=end_date,
+        flow_dates = pd.to_datetime(result.external_flows.index, utc=False).tz_localize(None).normalize()
+        mask = pd.Series(True, index=result.external_flows.index)
+        if start_date is not None:
+            mask &= flow_dates >= pd.Timestamp(start_date)
+        if end_date is not None:
+            mask &= flow_dates <= pd.Timestamp(end_date)
+        window_flows = result.external_flows.loc[mask]
+        window_equity = result.equity.loc[mask]
+        if not window_flows.empty:
+            first_window_date = window_flows.index[0]
+            prior_equity = result.equity.loc[result.equity.index < first_window_date]
+            initial_equity = float(prior_equity.iloc[-1]) if not prior_equity.empty else 0.0
+            initial_equity_date = prior_equity.index[-1] if not prior_equity.empty else None
+            self._last_daily_returns = _cashflow_adjusted_returns(
+                window_equity,
+                window_flows,
+                initial_equity=initial_equity,
+                flow_timing="end",
+            )
+            self._last_accounting_metrics = _cashflow_accounting_metrics(
+                window_equity,
+                window_flows,
+                initial_equity=initial_equity,
+                initial_equity_date=initial_equity_date,
+            )
+        else:
+            self._last_daily_returns = pd.Series(dtype=float)
+            self._last_accounting_metrics = _cashflow_accounting_metrics(
+                pd.Series(dtype=float), pd.Series(dtype=float)
+            )
+        self._last_accounting_metrics["TWR_total_return"] = float(
+            (1.0 + self._last_daily_returns).prod() - 1.0
         )
         self._run_return_history.append(self._last_daily_returns.copy())
         elapsed = (datetime.now(timezone.utc) - started).total_seconds()
@@ -300,6 +345,7 @@ class CryptoEquityComboBacktestRunner:
             start_date=start_date or (eval_frame["date"].min().date() if not eval_frame.empty else None),
             end_date=end_date or (eval_frame["date"].max().date() if not eval_frame.empty else None),
             run_duration_seconds=elapsed,
+            cost_model="not_modelled_synthetic_proxy",
         )
 
 

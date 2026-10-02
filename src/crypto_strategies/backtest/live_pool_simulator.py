@@ -17,6 +17,197 @@ class LivePoolBacktestResult:
     trade_log: pd.DataFrame = field(default_factory=lambda: pd.DataFrame(
         columns=["signal_date", "effective_date", "turnover", "fee", "slippage", "cost"]
     ))
+    cost_status: str = "not_modelled"
+    accounting_status: str = "unavailable"
+    accounting: dict[str, Any] = field(default_factory=dict)
+    equity: pd.Series = field(default_factory=lambda: pd.Series(dtype=float))
+    external_flows: pd.Series = field(default_factory=lambda: pd.Series(dtype=float))
+
+
+def _cashflow_adjusted_returns(
+    equity: pd.Series,
+    external_flows: pd.Series,
+    *,
+    initial_equity: float = 0.0,
+    flow_timing: str = "end",
+) -> pd.Series:
+    """Return daily time-weighted returns with explicitly timed external flows."""
+    if not math.isfinite(float(initial_equity)) or initial_equity < 0.0:
+        raise ValueError("initial_equity must be finite and non-negative")
+    if flow_timing not in {"start", "end"}:
+        raise ValueError("flow_timing must be 'start' or 'end'")
+    if not equity.index.equals(external_flows.index):
+        raise ValueError("equity and external_flows must have identical indexes")
+    values = equity.astype(float)
+    flows = external_flows.astype(float)
+    if not np.isfinite(values.to_numpy()).all() or not np.isfinite(flows.to_numpy()).all():
+        raise ValueError("equity and external_flows must be finite")
+    returns: list[float] = []
+    prior_equity = float(initial_equity)
+    for value, flow in zip(values, flows, strict=True):
+        value = float(value)
+        flow = float(flow)
+        if prior_equity == 0.0:
+            if flow_timing != "end" or flow <= 0.0 or value <= 0.0:
+                raise ValueError("first period requires positive initial cash or initial_equity")
+            period_return = 0.0
+        elif flow_timing == "end":
+            investment_value = value - flow
+            if prior_equity <= 0.0 or investment_value <= 0.0 or value <= 0.0:
+                raise ValueError("wealth must remain positive after external cash flows")
+            period_return = investment_value / prior_equity - 1.0
+        else:
+            invested_equity = prior_equity + flow
+            if invested_equity <= 0.0 or value <= 0.0:
+                raise ValueError("wealth must remain positive after external cash flows")
+            period_return = value / invested_equity - 1.0
+        if not math.isfinite(period_return) or period_return <= -1.0:
+            raise ValueError("net return must be finite and greater than -1.0")
+        if abs(period_return) < 1e-12:
+            period_return = 0.0
+        if value <= 0.0:
+            raise ValueError("wealth must remain positive after external cash flows")
+        returns.append(period_return)
+        prior_equity = value
+    return pd.Series(returns, index=equity.index, dtype=float)
+
+
+def _cashflow_accounting_metrics(
+    equity: pd.Series,
+    external_flows: pd.Series,
+    *,
+    initial_equity: float = 0.0,
+    initial_equity_date: Any | None = None,
+) -> dict[str, Any]:
+    """Summarize portfolio cash flows; flows are signed and dated at period end."""
+    if not equity.index.equals(external_flows.index):
+        raise ValueError("equity and external_flows must have identical indexes")
+    values = equity.astype(float)
+    flows = external_flows.astype(float)
+    if not np.isfinite(values.to_numpy()).all() or not np.isfinite(flows.to_numpy()).all():
+        raise ValueError("equity and external_flows must be finite")
+    if not math.isfinite(float(initial_equity)) or initial_equity < 0.0:
+        raise ValueError("initial_equity must be finite and non-negative")
+    if values.empty:
+        return {
+            "status": "unavailable",
+            "xirr_status": "unavailable",
+            "xirr": None,
+            "initial_equity": float(initial_equity),
+            "ending_equity": float(initial_equity),
+            "cumulative_contributions": 0.0,
+            "cumulative_withdrawals": 0.0,
+            "net_contributions": 0.0,
+            "net_profit": 0.0,
+            "flow_timing": "end_of_day",
+            "initial_equity_date": None,
+        }
+    if (values <= 0.0).any():
+        raise ValueError("wealth must remain positive")
+    dates = pd.DatetimeIndex(pd.to_datetime(values.index)).normalize()
+    investor_flows = -flows.to_numpy(dtype=float)
+    xirr_status: str
+    if initial_equity > 0.0:
+        if initial_equity_date is None:
+            xirr, xirr_status = None, "unavailable_missing_initial_equity_date"
+        else:
+            initial_date = pd.Timestamp(initial_equity_date).normalize()
+            if initial_date >= dates[0]:
+                raise ValueError("initial_equity_date must precede the first cash-flow date")
+            investor_flows = np.insert(investor_flows, 0, -float(initial_equity))
+            dates = dates.insert(0, initial_date)
+            xirr = None
+            xirr_status = "unavailable"
+    else:
+        xirr = None
+        xirr_status = "unavailable"
+    if initial_equity <= 0.0 or initial_equity_date is not None:
+        investor_flows[-1] += float(values.iloc[-1])
+        xirr, xirr_status = _solve_xirr(dates, investor_flows)
+    contributions = float(flows.clip(lower=0.0).sum())
+    withdrawals = float(-flows.clip(upper=0.0).sum())
+    net_contributions = float(initial_equity) + contributions - withdrawals
+    return {
+        "status": "computed",
+        "xirr_status": xirr_status,
+        "xirr": xirr,
+        "initial_equity": float(initial_equity),
+        "ending_equity": float(values.iloc[-1]),
+        "cumulative_contributions": contributions,
+        "cumulative_withdrawals": withdrawals,
+        "net_contributions": net_contributions,
+        "net_profit": float(values.iloc[-1]) - net_contributions,
+        "flow_timing": "end_of_day",
+        "cashflow_start_date": pd.Timestamp(values.index[0]).date().isoformat(),
+        "cashflow_end_date": pd.Timestamp(values.index[-1]).date().isoformat(),
+        "initial_equity_date": (
+            pd.Timestamp(initial_equity_date).date().isoformat()
+            if initial_equity > 0.0 and initial_equity_date is not None
+            else None
+        ),
+    }
+
+
+def _solve_xirr(dates: pd.DatetimeIndex, cashflows: np.ndarray) -> tuple[float | None, str]:
+    dates = pd.DatetimeIndex(pd.to_datetime(dates)).normalize()
+    cashflows = np.asarray(cashflows, dtype=float)
+    if len(dates) != len(cashflows) or not np.isfinite(cashflows).all():
+        return None, "unavailable_invalid_cashflows"
+    if len(dates) and dates.nunique() == 1:
+        return None, "unavailable_no_elapsed_time"
+    grouped = pd.Series(cashflows, index=dates).groupby(level=0, sort=True).sum()
+    grouped = grouped.loc[grouped != 0.0]
+    dates = pd.DatetimeIndex(grouped.index)
+    cashflows = grouped.to_numpy(dtype=float)
+    if not len(dates):
+        return None, "unavailable_insufficient_signs"
+    day_offsets = (dates - dates[0]).days.to_numpy(dtype=float) / 365.25
+    if np.ptp(day_offsets) == 0.0:
+        return None, "unavailable_no_elapsed_time"
+    if not (cashflows < 0).any() or not (cashflows > 0).any():
+        return None, "unavailable_insufficient_signs"
+    signs = np.sign(cashflows)
+    sign_changes = int(np.count_nonzero(signs[1:] != signs[:-1]))
+
+    def npv(rate: float) -> float:
+        try:
+            with np.errstate(over="raise", invalid="raise", divide="raise"):
+                return float(np.sum(cashflows / np.power(1.0 + rate, day_offsets)))
+        except (FloatingPointError, ZeroDivisionError):
+            return math.copysign(math.inf, float(cashflows[0]))
+
+    grid = np.unique(np.concatenate((np.linspace(-0.999999, 1.0, 1000), np.geomspace(2.0, 1001.0, 800) - 1.0, [0.0])))
+    roots: list[float] = []
+    previous_rate = float(grid[0])
+    previous_value = npv(previous_rate)
+    for rate_value in grid[1:]:
+        rate = float(rate_value)
+        value = npv(rate)
+        tolerance = 1e-12 * max(1.0, float(np.abs(cashflows).sum()))
+        if abs(value) <= tolerance:
+            roots.append(rate)
+        elif math.isfinite(value) and math.isfinite(previous_value) and value * previous_value < 0.0:
+            low, high = previous_rate, rate
+            low_value = previous_value
+            for _ in range(100):
+                mid = (low + high) / 2.0
+                mid_value = npv(mid)
+                if abs(mid_value) <= 1e-10 or high - low <= 1e-12:
+                    low = high = mid
+                    break
+                if low_value * mid_value <= 0.0:
+                    high = mid
+                else:
+                    low, low_value = mid, mid_value
+            roots.append((low + high) / 2.0)
+        previous_rate, previous_value = rate, value
+    if len(roots) > 1:
+        return None, "ambiguous_multiple_roots"
+    if sign_changes > 1:
+        return None, "ambiguous_nonconventional_cashflows"
+    if not roots:
+        return None, "unavailable_no_root"
+    return min(roots, key=abs), "computed"
 
 
 def _performance_metrics(

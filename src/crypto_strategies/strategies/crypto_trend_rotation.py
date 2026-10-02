@@ -17,6 +17,7 @@ Enhancements over the original stripped version:
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 import pandas as pd
@@ -152,39 +153,46 @@ def _apply_volatility_scaling(
 ) -> dict[str, float]:
     """Scale position weights inversely by volatility.
 
-    When vol_scaling_enabled, each weight is scaled so the
-    portfolio-level volatility stays near target_vol.
-    max_leverage caps the total exposure (1.0 = 100%).
+    When enabled, weighted single-asset volatility scales exposure toward
+    target_vol. This proxy does not estimate covariance portfolio risk.
+    max_leverage caps final gross exposure; scaling never increases weights.
     """
-    if not coerce_bool(vol_scaling_enabled, default=True):
-        return weights
     if not weights:
         return weights
 
-    total_weight = sum(weights.values())
+    if not all(math.isfinite(float(weight)) and float(weight) >= 0.0 for weight in weights.values()):
+        raise ValueError("weights must be finite and non-negative")
+    total_weight = sum(float(weight) for weight in weights.values())
     if total_weight <= 0:
         return weights
 
-    # Estimate portfolio vol as weighted average of individual vols
+    target_vol = float(target_vol)
+    max_lev = float(max_leverage)
+    if not math.isfinite(target_vol) or target_vol <= 0.0:
+        raise ValueError("target_vol must be finite and positive")
+    if not math.isfinite(max_lev) or max_lev < 0.0:
+        raise ValueError("max_leverage must be finite and non-negative")
+    max_scale = min(1.0, max_lev / total_weight)
+    if not coerce_bool(vol_scaling_enabled, default=True):
+        return {symbol: weight * max_scale for symbol, weight in weights.items()}
+
+    # Estimate risk from weighted single-asset vol; this is not covariance risk.
     weighted_vol = 0.0
     vol_sum = 0.0
     for symbol, weight in weights.items():
         indicators = indicators_map.get(symbol, {})
         vol20 = coerce_float(indicators.get("vol20"), default=float("nan"))
-        if not pd.isna(vol20) and vol20 > 0:
+        if math.isfinite(float(vol20)) and vol20 > 0:
             weighted_vol += weight * vol20
             vol_sum += weight
 
-    if vol_sum <= 0 or weighted_vol <= 0:
-        return weights
+    # Missing vol blocks exposure; an unknown risk estimate must not bypass either cap.
+    if vol_sum < total_weight:
+        return {symbol: 0.0 for symbol in weights}
 
-    avg_vol = weighted_vol / vol_sum
-    target_vol = float(target_vol)
-    max_lev = float(max_leverage)
-
-    # Scale: if current vol > target, reduce; if < target, allow up to max_leverage
-    scale = min(max_lev, target_vol / avg_vol) if avg_vol > 0 else max_lev
-    scale = max(0.5, min(1.0, scale))  # clamp to [0.5, 1.0] to avoid extreme moves
+    # Weighted single-asset vol is an exposure proxy, not covariance portfolio vol.
+    portfolio_vol_proxy = weighted_vol
+    scale = min(max_scale, target_vol / portfolio_vol_proxy) if portfolio_vol_proxy > 0 else max_scale
 
     return {symbol: weight * scale for symbol, weight in weights.items()}
 
@@ -266,6 +274,8 @@ def build_target_weights(
     circuit_breaker_enabled = coerce_bool(config.get("circuit_breaker_enabled"), default=True)
     btc_drawdown_threshold = float(config.get("btc_drawdown_threshold", 0.30))
     vol_scaling_enabled = coerce_bool(config.get("vol_scaling_enabled"), default=True)
+    target_vol = float(config.get("target_vol", 0.40))
+    max_leverage = float(config.get("max_leverage", 1.0))
 
     # Extract BTC benchmark from indicators_map
     btc_snapshot = _extract_btc_snapshot(indicators_map)
@@ -307,6 +317,20 @@ def build_target_weights(
         weights_map,
         indicators_map,
         vol_scaling_enabled=vol_scaling_enabled,
+        target_vol=target_vol,
+        max_leverage=max_leverage,
+    )
+    volatility_status = (
+        "disabled"
+        if not vol_scaling_enabled
+        else "blocked_missing_volatility"
+        if any(
+            not math.isfinite(coerce_float(indicators_map.get(symbol, {}).get("vol20"), default=float("nan")))
+            or coerce_float(indicators_map.get(symbol, {}).get("vol20"), default=float("nan")) <= 0.0
+            for symbol, weight in weights_map.items()
+            if weight > 0.0
+        )
+        else "proxy_scaled"
     )
 
     return {
@@ -314,6 +338,7 @@ def build_target_weights(
             "weight": scaled_weights.get(sym, selected_candidates[sym]["weight"]),
             "relative_score": selected_candidates[sym]["relative_score"],
             "abs_momentum": selected_candidates[sym]["abs_momentum"],
+            "volatility_scaling_status": volatility_status,
         }
         for sym in selected_candidates
     }
@@ -356,6 +381,8 @@ def compute_signals(
         "circuit_breaker_enabled": kwargs.get("circuit_breaker_enabled", True),
         "btc_drawdown_threshold": kwargs.get("btc_drawdown_threshold", 0.30),
         "vol_scaling_enabled": kwargs.get("vol_scaling_enabled", True),
+        "target_vol": kwargs.get("target_vol", 0.40),
+        "max_leverage": kwargs.get("max_leverage", 1.0),
     }
 
     frame = _to_indicator_frame(feature_snapshot)
@@ -412,6 +439,7 @@ def compute_signals(
                 "weight": float(payload["weight"]),
                 "relative_score": float(payload["relative_score"]),
                 "abs_momentum": float(payload["abs_momentum"]),
+                "volatility_scaling_status": payload["volatility_scaling_status"],
             }
             for sym, payload in selected.items()
         },

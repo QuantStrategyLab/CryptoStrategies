@@ -233,6 +233,9 @@ def run_backtest(
             "orchestrator": {
                 "equity": pd.Series(dtype=float),
                 "metrics": payload["metrics"],
+                "accounting": payload["accounting"],
+                "cost_status": payload["cost_status"],
+                "simulation_model": payload["simulation_model"],
                 "profile": payload["profile"],
                 "source": payload["source"],
             }
@@ -293,9 +296,24 @@ def run_backtest(
     metrics_c = _compute_metrics(equity_c, "Dynamic Combo")
 
     return {
-        "Pure BTC DCA": {"equity": equity_a, "metrics": metrics_a},
-        "Static Combo": {"equity": equity_b, "metrics": metrics_b},
-        "Dynamic Combo": {"equity": equity_c, "metrics": metrics_c},
+        "Pure BTC DCA": {
+            "equity": equity_a,
+            "metrics": metrics_a,
+            "simulation_model": "historical_btc_dca_no_cost_model",
+            "cost_status": "not_modelled",
+        },
+        "Static Combo": {
+            "equity": equity_b,
+            "metrics": metrics_b,
+            "simulation_model": "synthetic_alt_proxy_not_strategy_replay",
+            "cost_status": "not_modelled",
+        },
+        "Dynamic Combo": {
+            "equity": equity_c,
+            "metrics": metrics_c,
+            "simulation_model": "synthetic_alt_proxy_not_strategy_replay",
+            "cost_status": "not_modelled",
+        },
     }
 
 
@@ -310,7 +328,10 @@ def _simulate_btc_dca(
     price = btc_close.reindex(idx)
     btc_units = pd.Series(DCA_AMOUNT_USD / price, index=idx)
     cum_units = btc_units.cumsum()
-    return cum_units * price
+    equity = cum_units * price
+    equity.attrs["external_flows"] = pd.Series(DCA_AMOUNT_USD, index=idx)
+    equity.attrs["flow_timing"] = "end_of_day"
+    return equity
 
 
 def _simulate_combo(
@@ -385,15 +406,26 @@ def _simulate_combo(
         )
         portfolio_values.append(btc_value + alt_value + cash_held)
 
-    return pd.Series(portfolio_values, index=idx)
+    equity = pd.Series(portfolio_values, index=idx)
+    equity.attrs["external_flows"] = pd.Series(DCA_AMOUNT_USD, index=idx)
+    equity.attrs["flow_timing"] = "end_of_day"
+    equity.attrs["simulation_model"] = "synthetic_alt_proxy_not_strategy_replay"
+    return equity
 
 
 def _compute_metrics(
     equity: pd.Series,
     label: str,
 ) -> dict[str, Any]:
-    """Compute per-period metrics for a single equity curve."""
+    """Compute cashflow-adjusted per-period metrics for a single equity curve."""
+    from crypto_strategies.backtest.live_pool_simulator import (
+        _cashflow_accounting_metrics,
+        _cashflow_adjusted_returns,
+        _performance_metrics,
+    )
+
     periods_metrics: dict[str, Any] = {}
+    all_flows = equity.attrs.get("external_flows", pd.Series(0.0, index=equity.index))
     for period_name, (start_str, end_str) in PERIODS.items():
         start_ts = pd.Timestamp(start_str)
         end_ts = pd.Timestamp(end_str)
@@ -404,21 +436,47 @@ def _compute_metrics(
                 "max_drawdown": 0.0,
                 "sharpe": 0.0,
                 "total_return": 0.0,
+                "cumulative_contributions": 0.0,
+                "cumulative_withdrawals": 0.0,
+                "net_profit": 0.0,
+                "xirr": None,
+                "xirr_status": "unavailable_empty_period",
+                "cost_status": "not_modelled",
             }
             continue
 
-        start_val = sub.iloc[0]
-        end_val = sub.iloc[-1]
-        total_ret = end_val / start_val - 1.0 if start_val > 0 else 0.0
-        ann_ret = _safe_annual_return(sub)
-        mdd = _safe_max_drawdown(sub)
-        sharpe = _safe_sharpe(sub)
+        flows = all_flows.reindex(sub.index).fillna(0.0).astype(float)
+        prior = equity.loc[equity.index < sub.index[0]]
+        initial_equity = float(prior.iloc[-1]) if not prior.empty else 0.0
+        returns = _cashflow_adjusted_returns(
+            sub,
+            flows,
+            initial_equity=initial_equity,
+            flow_timing="end",
+        )
+        perf = _performance_metrics(returns)
+        accounting = _cashflow_accounting_metrics(
+            sub,
+            flows,
+            initial_equity=initial_equity,
+            initial_equity_date=prior.index[-1] if not prior.empty else None,
+        )
 
         periods_metrics[period_name] = {
-            "annual_return": round(float(ann_ret), 4),
-            "max_drawdown": round(float(mdd), 4),
-            "sharpe": round(float(sharpe), 4),
-            "total_return": round(float(total_ret), 4),
+            "annual_return": round(float(perf["CAGR"]), 4),
+            "max_drawdown": round(float(perf["Max Drawdown"]), 4),
+            "sharpe": round(float(perf["Sharpe"]), 4),
+            "total_return": round(float(perf["total_return"]), 4),
+            "twr_total_return": round(float((1.0 + returns).prod() - 1.0), 4),
+            "xirr": accounting["xirr"],
+            "xirr_status": accounting["xirr_status"],
+            "initial_equity": round(float(accounting["initial_equity"]), 4),
+            "ending_equity": round(float(accounting["ending_equity"]), 4),
+            "cumulative_contributions": round(float(accounting["cumulative_contributions"]), 4),
+            "cumulative_withdrawals": round(float(accounting["cumulative_withdrawals"]), 4),
+            "net_profit": round(float(accounting["net_profit"]), 4),
+            "flow_timing": accounting["flow_timing"],
+            "cost_status": "not_modelled",
         }
 
     return periods_metrics
@@ -532,6 +590,9 @@ def main() -> None:
                 "profile": payload["profile"],
                 "metrics": payload["metrics"],
                 "source": payload["source"],
+                "accounting": payload["accounting"],
+                "cost_status": payload["cost_status"],
+                "simulation_model": payload["simulation_model"],
                 "orchestrator": True,
             },
             indent=2,
@@ -543,7 +604,11 @@ def main() -> None:
         # Strip equity curves for JSON output (too large)
         json_results: dict[str, Any] = {}
         for strat_name, data in results.items():
-            json_results[strat_name] = {"metrics": data["metrics"]}
+            json_results[strat_name] = {
+                "metrics": data["metrics"],
+                "simulation_model": data["simulation_model"],
+                "cost_status": data["cost_status"],
+            }
         json.dump(json_results, sys.stdout, indent=2)
         print()
     else:
