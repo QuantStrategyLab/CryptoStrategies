@@ -98,6 +98,73 @@ class CryptoTrendRotationModuleTest(unittest.TestCase):
         self.assertIn("managed_symbols", metadata)
         self.assertIn("selected_candidates", metadata)
 
+    def test_compute_signals_honors_low_volatility_target_and_leverage_cap(self) -> None:
+        feature_snapshot = pd.DataFrame([
+            {
+                "symbol": symbol,
+                "close": close,
+                "sma20": close * 0.95,
+                "sma60": close * 0.90,
+                "sma200": close * 0.80,
+                "roc20": 0.20,
+                "roc60": 0.35,
+                "roc120": 0.60,
+                "vol20": 2.0,
+                "avg_quote_vol_30": 60_000_000.0,
+                "avg_quote_vol_90": 50_000_000.0,
+                "avg_quote_vol_180": 45_000_000.0,
+                "trend_persist_90": 0.80,
+                "age_days": 500,
+            }
+            for symbol, close in (("SOLUSDT", 180.0), ("ETHUSDT", 3000.0))
+        ])
+        weights, _, _, _, metadata = compute_signals(
+            feature_snapshot,
+            [],
+            target_vol=0.40,
+            max_leverage=0.20,
+        )
+        self.assertIsNotNone(weights)
+        self.assertAlmostEqual(sum(weights.values()), 0.20)
+        self.assertTrue(all(
+            payload["volatility_scaling_status"] == "proxy_scaled"
+            for payload in metadata["selected_candidates"].values()
+        ))
+        self.assertTrue(all(
+            payload["volatility_scaling_status"] == "proxy_scaled"
+            for payload in metadata["selected_candidates"].values()
+        ))
+
+    def test_scaling_caps_gross_exposure_for_large_weights_and_unknown_volatility(self) -> None:
+        from crypto_strategies.strategies.crypto_trend_rotation import _apply_volatility_scaling
+
+        for weights in ({"A": 1.0}, {"A": 1.2, "B": 0.8}):
+            scaled = _apply_volatility_scaling(
+                weights,
+                {symbol: {"vol20": 2.0} for symbol in weights},
+                target_vol=0.40,
+                max_leverage=0.20,
+            )
+            self.assertAlmostEqual(sum(scaled.values()), 0.20)
+
+        capped_without_vol_scaling = _apply_volatility_scaling(
+            {"A": 0.8, "B": 0.7},
+            {"A": {"vol20": 0.2}, "B": {"vol20": 0.3}},
+            vol_scaling_enabled=False,
+            max_leverage=0.20,
+        )
+        self.assertAlmostEqual(sum(capped_without_vol_scaling.values()), 0.20)
+
+        blocked_unknown = _apply_volatility_scaling(
+            {"A": 1.0}, {"A": {"vol20": float("nan")}}, max_leverage=0.20
+        )
+        self.assertEqual(blocked_unknown, {"A": 0.0})
+
+        zero_cap = _apply_volatility_scaling(
+            {"A": 1.0}, {"A": {"vol20": 0.2}}, max_leverage=0.0
+        )
+        self.assertEqual(zero_cap, {"A": 0.0})
+
     def test_compute_signals_empty_snapshot(self) -> None:
         """An empty feature snapshot should return None weights."""
         feature_snapshot = pd.DataFrame()

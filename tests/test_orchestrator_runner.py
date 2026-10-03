@@ -89,6 +89,9 @@ class CryptoEquityComboBacktestRunnerTests(unittest.TestCase):
         self.assertLessEqual(runner.last_daily_returns.index.max().date(), date(2024, 6, 1))
         self.assertEqual(result.observation_count, len(runner.last_daily_returns))
         self.assertEqual(len(runner.run_return_history), 1)
+        self.assertEqual(result.cost_model, "not_modelled_synthetic_proxy")
+        self.assertEqual(runner.cost_status, "not_modelled")
+        self.assertIn("net_profit", runner.last_accounting_metrics)
 
     def test_invalid_combo_mode_raises(self) -> None:
         runner = CryptoEquityComboBacktestRunner(synthetic_days=1600)

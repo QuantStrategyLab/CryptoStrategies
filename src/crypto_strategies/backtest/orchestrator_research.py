@@ -91,6 +91,9 @@ def run_combo_profile_backtest(
         "start_date": result.start_date.isoformat() if result.start_date else None,
         "end_date": result.end_date.isoformat() if result.end_date else None,
         "metrics": _result_to_metrics(result),
+        "accounting": runner.last_accounting_metrics,
+        "cost_status": runner.cost_status,
+        "simulation_model": "synthetic_alt_proxy_not_strategy_replay",
         "source": "CryptoEquityComboBacktestRunner",
         "run_id": getattr(result, "run_id", None),
     }

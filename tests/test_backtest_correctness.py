@@ -7,6 +7,7 @@ import tomllib
 from pathlib import Path
 
 import pandas as pd
+import numpy as np
 import pytest
 
 from crypto_strategies.backtest.live_pool_simulator import run_live_pool_rotation_backtest
@@ -235,6 +236,125 @@ def test_cost_that_wipes_out_portfolio_fails_closed(final_open: float) -> None:
 
     with pytest.raises(ValueError, match="transaction cost must be less than 1.0"):
         run_live_pool_rotation_backtest(panel, top_n=1, fee_bps=20_000)
+
+
+def test_cashflow_adjusted_returns_exclude_end_of_day_contributions_and_withdrawals() -> None:
+    from crypto_strategies.backtest.live_pool_simulator import _cashflow_adjusted_returns
+
+    dates = pd.date_range("2024-01-01", periods=3, freq="D")
+    equity = pd.Series([100.0, 190.0, 180.0], index=dates)
+    flows = pd.Series([100.0, 100.0, -10.0], index=dates)
+    returns = _cashflow_adjusted_returns(equity, flows, flow_timing="end")
+    assert returns.tolist() == pytest.approx([0.0, -0.1, 0.0])
+
+
+def test_cashflow_adjusted_returns_support_start_of_period_flows() -> None:
+    from crypto_strategies.backtest.live_pool_simulator import _cashflow_adjusted_returns
+
+    dates = pd.date_range("2024-01-01", periods=2, freq="D")
+    equity = pd.Series([110.0, 210.0], index=dates)
+    flows = pd.Series([0.0, 100.0], index=dates)
+    returns = _cashflow_adjusted_returns(
+        equity, flows, initial_equity=100.0, flow_timing="start"
+    )
+    assert returns.tolist() == pytest.approx([0.1, 0.0])
+
+
+@pytest.mark.parametrize(
+    ("equity", "flows"),
+    [([100.0, float("nan")], [100.0, 0.0]), ([100.0, float("inf")], [100.0, 0.0]), ([100.0, -1.0], [100.0, 0.0])],
+)
+def test_cashflow_adjusted_returns_reject_nonfinite_or_nonpositive_wealth(equity, flows) -> None:
+    from crypto_strategies.backtest.live_pool_simulator import _cashflow_adjusted_returns
+
+    dates = pd.date_range("2024-01-01", periods=2, freq="D")
+    with pytest.raises(ValueError):
+        _cashflow_adjusted_returns(
+            pd.Series(equity, index=dates), pd.Series(flows, index=dates), flow_timing="end"
+        )
+
+
+def test_flat_contributions_have_zero_xirr_and_profit() -> None:
+    from crypto_strategies.backtest.live_pool_simulator import _cashflow_accounting_metrics
+
+    dates = pd.date_range("2024-01-01", periods=365, freq="D")
+    flows = pd.Series(100.0, index=dates)
+    equity = flows.cumsum()
+    result = _cashflow_accounting_metrics(equity, flows)
+    assert result["xirr"] == 0.0
+    assert result["net_profit"] == 0.0
+    assert result["cumulative_contributions"] == 36_500.0
+    assert result["cumulative_withdrawals"] == 0.0
+    assert result["cashflow_start_date"] == dates[0].date().isoformat()
+    assert result["cashflow_end_date"] == dates[-1].date().isoformat()
+
+
+def test_cashflow_summary_counts_withdrawals_and_reports_net_profit() -> None:
+    from crypto_strategies.backtest.live_pool_simulator import _cashflow_accounting_metrics
+
+    dates = pd.date_range("2024-01-01", periods=3, freq="D")
+    flows = pd.Series([100.0, 100.0, -10.0], index=dates)
+    equity = pd.Series([100.0, 190.0, 180.0], index=dates)
+    result = _cashflow_accounting_metrics(equity, flows)
+    assert result["cumulative_contributions"] == 200.0
+    assert result["cumulative_withdrawals"] == 10.0
+    assert result["net_contributions"] == 190.0
+    assert result["net_profit"] == -10.0
+    assert result["xirr_status"] == "computed"
+
+
+def test_xirr_uses_actual_initial_capital_date_and_flags_multiple_roots() -> None:
+    from crypto_strategies.backtest.live_pool_simulator import (
+        _cashflow_accounting_metrics,
+        _solve_xirr,
+    )
+
+    cashflow_day = pd.Timestamp("2024-01-10")
+    equity = pd.Series([110.0], index=pd.DatetimeIndex([cashflow_day]))
+    flows = pd.Series([0.0], index=equity.index)
+    result = _cashflow_accounting_metrics(
+        equity,
+        flows,
+        initial_equity=100.0,
+        initial_equity_date=pd.Timestamp("2024-01-01"),
+    )
+    assert result["initial_equity_date"] == "2024-01-01"
+    assert result["xirr"] == pytest.approx(1.1 ** (365.25 / 9) - 1.0)
+
+    dates = pd.DatetimeIndex(
+        pd.Timestamp("2020-01-01")
+        + pd.to_timedelta([0.0, 365.25, 730.5], unit="D")
+    )
+    xirr, status = _solve_xirr(dates, np.array([-100.0, 230.0, -132.0]))
+    assert xirr is None
+    assert status == "ambiguous_multiple_roots"
+
+    xirr, status = _solve_xirr(
+        pd.DatetimeIndex([cashflow_day, cashflow_day]), np.array([-100.0, 110.0])
+    )
+    assert xirr is None
+    assert status == "unavailable_no_elapsed_time"
+
+
+def test_xirr_conservatively_rejects_nonconventional_cashflows() -> None:
+    from crypto_strategies.backtest.live_pool_simulator import _solve_xirr
+
+    dates = pd.date_range("2020-01-01", periods=4, freq="365D")
+    xirr, status = _solve_xirr(
+        dates,
+        np.array([-100.0, 370.05, -451.13, 181.5825]),
+    )
+    assert xirr is None
+    assert status in {"ambiguous_nonconventional_cashflows", "ambiguous_multiple_roots"}
+
+
+def test_xirr_merges_same_day_cashflows_before_classifying_sign_changes() -> None:
+    from crypto_strategies.backtest.live_pool_simulator import _solve_xirr
+
+    dates = pd.DatetimeIndex(["2020-01-01", "2020-01-01", "2021-01-01", "2022-12-31"])
+    xirr, status = _solve_xirr(dates, np.array([-100.0, 50.0, -50.0, 110.0]))
+    assert xirr is not None
+    assert status == "computed"
 
 
 def test_synthetic_panel_digest_is_stable_across_hash_seeds() -> None:
