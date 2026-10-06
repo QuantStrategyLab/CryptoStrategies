@@ -1,15 +1,8 @@
 # CryptoStrategies
 
-
-## QSL architecture role
-
-- **Layer**: `strategy-library`.
-- **Responsibility**: crypto strategy implementation package.
-- **Owns**: runtime strategy code and metadata consumed by BinancePlatform.
-- **Consumes**: QuantPlatformKit and CryptoLivePoolPipelines artifacts.
-- **Must not**: own broker credentials or execution deployment.
-
 [Chinese README](README.zh-CN.md)
+
+CryptoStrategies holds the crypto strategy code that Binance trading runs on. It is the strategy-library layer of the QuantStrategyLab system: BinancePlatform loads strategy implementations and metadata from here, while upstream pipelines such as CryptoLivePoolPipelines and QuantPlatformKit own live-pool selection, ranking, and promotion evidence. The package stays deliberately narrow — no broker credentials, no deployment switches live here. Anyone implementing or reviewing a Binance-facing crypto strategy, or checking whether a profile is cleared for live trading, will want to start in this repository.
 
 > Investing involves risk. This project does not provide investment advice and is for education, research, and engineering review only.
 
@@ -25,6 +18,14 @@ It is one layer of a multi-repository system:
 - **Shared infrastructure**: keeps contracts, settings, adapters, plugins, and audit workflows reusable across repositories.
 
 This repository owns strategy code and metadata. For snapshot-backed crypto profiles, it consumes the upstream live pool and does not rebuild monthly pool membership or ordering locally. It does not hold broker credentials, submit orders by itself, or replace the live-pool/release evidence required before a profile is enabled for live runtime settings.
+
+## QSL architecture role
+
+- **Layer**: `strategy-library`.
+- **Responsibility**: crypto strategy implementation package.
+- **Owns**: runtime strategy code and metadata consumed by BinancePlatform.
+- **Consumes**: QuantPlatformKit and CryptoLivePoolPipelines artifacts.
+- **Must not**: own broker credentials or execution deployment.
 
 ## Strategy profiles
 
@@ -51,8 +52,6 @@ Research-only profiles may stay in code for reproducibility and future review, b
 | `crypto_btc_dca` | Crypto BTC DCA | Shadow candidate; allowed for monitoring and accumulation review, but still platform gated. |
 | `crypto_trend_rotation` | Crypto Trend Rotation | Research-only redesign candidate. |
 | `crypto_equity_combo` | Crypto Equity Combo | Research-only orchestrator candidate. |
-
-No direct runtime strategies are exposed from this package.
 
 ## How this connects to execution
 
