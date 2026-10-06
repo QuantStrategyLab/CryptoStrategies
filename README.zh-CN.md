@@ -1,15 +1,8 @@
 # CryptoStrategies
 
-
-## QSL 架构角色
-
-- **层级**：`策略库`。
-- **职责**：加密策略实现包。
-- **事实源/归属**：BinancePlatform 消费的 runtime 策略代码和元数据。
-- **消费对象**：QuantPlatformKit 和 CryptoLivePoolPipelines artifacts。
-- **禁止事项**：持有券商凭据或执行部署。
-
 [English README](README.md)
+
+CryptoStrategies 保存 Binance 实盘交易所依赖的加密策略代码。它是 QuantStrategyLab 系统里的策略库层：BinancePlatform 从这里加载策略实现和元数据，而 live-pool 的选池、排序和晋级证据由 CryptoLivePoolPipelines、QuantPlatformKit 等上游流水线负责。这个包刻意保持精简——不持有券商凭据，也不包含部署开关。无论是实现或评审面向 Binance 的加密策略，还是确认某个 profile 是否已具备 live 交易资格，都可以从这个仓库入手。
 
 > 投资有风险。本项目不构成投资建议，仅用于学习、研究和工程审阅。
 
@@ -25,6 +18,14 @@ CryptoStrategies 是 QuantStrategyLab 的加密货币策略包。为 Binance 执
 - **共享基础设施**：维护契约、配置、适配器、插件和审计 workflow，供多仓复用。
 
 本仓库负责策略代码和元数据。对 snapshot-backed 加密策略来说，本仓库只消费上游 live pool，不在本地重建月度池成员或顺序。本仓库不保存券商凭据，不直接提交订单，也不替代 live enable 前需要看的 live-pool/release 证据。
+
+## QSL 架构角色
+
+- **层级**：`策略库`。
+- **职责**：加密策略实现包。
+- **事实源/归属**：BinancePlatform 消费的 runtime 策略代码和元数据。
+- **消费对象**：QuantPlatformKit 和 CryptoLivePoolPipelines artifacts。
+- **禁止事项**：持有券商凭据或执行部署。
 
 ## 策略 profile
 
@@ -46,7 +47,11 @@ CryptoStrategies 是 QuantStrategyLab 的加密货币策略包。为 Binance 执
 
 研究侧 profile 可以保留在代码里用于复现和后续评审，但不应该出现在当前可配置 live profile 中。
 
-本策略包当前不暴露普通 runtime 策略。
+| Profile | 名称 | 说明 |
+| --- | --- | --- |
+| `crypto_btc_dca` | Crypto BTC DCA | Shadow candidate，允许监控和定投复盘，但仍受平台门控。 |
+| `crypto_trend_rotation` | Crypto Trend Rotation | 研究侧重构候选。 |
+| `crypto_equity_combo` | Crypto Equity Combo | 研究侧编排候选。 |
 
 ## 如何接到执行平台
 
