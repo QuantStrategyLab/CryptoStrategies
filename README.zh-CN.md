@@ -63,6 +63,10 @@ CryptoStrategies 是 QuantStrategyLab 的加密货币策略包。为 Binance 执
 
 README 只作为项目地图，不替代最新表现数据。启用或调整 live profile 前，需要重新运行相关 live-pool/release pipeline，并分别看短、中、长周期的收益、最大回撤、相对基准收益、换手、数据新鲜度和 artifact 版本。月度 live-pool 选择、ranking 和 promotion 证据属于 CryptoLivePoolPipelines；本仓库的策略改动应保留这个上游权威边界。证据过期、不完整，或者 profile 仍标记为 research-only，就不要放进 live runtime settings。
 
+## 月报审计状态
+
+CryptoLivePoolPipelines 的月报 workflow 目前只生成审查材料和跟踪 Issue，不会自动 dispatch AIAuditBridge、执行双 AI 审计或应用 AI 修复。月报任务通过或 Issue 已创建，只能证明材料已准备，不能证明 AI 审查完成。修复建议必须经过 PR 和 CI。
+
 ## 仓库结构
 
 - `src/`：库代码和运行时代码。
