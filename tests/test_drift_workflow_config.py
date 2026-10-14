@@ -25,10 +25,10 @@ def test_drift_workflow_wires_real_pipeline_inputs_and_preflight_bundle() -> Non
     assert "repository: QuantStrategyLab/QuantPlatformKit" in workflow
     assert (
         "repository: QuantStrategyLab/QuantPlatformKit\n"
-        "          ref: 086166458d4e3f61bb8937054cf7e69ff6ef914a\n"
+        "          ref: eae362bd3e3fad5be59a7615eeba10be839a9934\n"
         "          path: external/QuantPlatformKit"
     ) in workflow
-    assert "quant_platform_kit_ref: 086166458d4e3f61bb8937054cf7e69ff6ef914a" in workflow
+    assert "quant_platform_kit_ref: eae362bd3e3fad5be59a7615eeba10be839a9934" in workflow
     assert "python -m pip install --no-deps -e external/QuantPlatformKit" in workflow
     assert "scripts/run_walk_forward_backtest.py" in workflow
     assert '"--list-profiles"' in workflow
@@ -38,10 +38,18 @@ def test_drift_workflow_wires_real_pipeline_inputs_and_preflight_bundle() -> Non
     assert "Upload lifecycle preflight artifact" in workflow
     assert "lifecycle-preflight-${{ github.run_id }}-${{ github.run_attempt }}" in workflow
     assert workflow.count("github.ref == format('refs/heads/{0}', github.event.repository.default_branch)") == 2
-    assert "uses: QuantStrategyLab/QuantPlatformKit/.github/workflows/reusable-drift-check.yml@086166458d4e3f61bb8937054cf7e69ff6ef914a" in workflow
+    assert "uses: QuantStrategyLab/QuantPlatformKit/.github/workflows/reusable-drift-check.yml@eae362bd3e3fad5be59a7615eeba10be839a9934" in workflow
     assert "strategy_domain: crypto" in workflow
     assert "snapshot_repository: QuantStrategyLab/CryptoLivePoolPipelines" in workflow
     assert "snapshot_checkout_path: external/CryptoLivePoolPipelines" in workflow
     assert "lifecycle_preflight_artifact: lifecycle-preflight-${{ github.run_id }}-${{ github.run_attempt }}" in workflow
-    assert "codex_audit_service_url: ${{ secrets.CODEX_AUDIT_SERVICE_URL }}" in workflow
+    # Retired v1 Codex/GPT/Claude reviewer wiring must not return.
+    assert "codex_audit_service_url" not in workflow
+    assert "ai_gateway_service_url" not in workflow
+    # V2 project-scoped task service; provider (e.g. dot) is chosen by the
+    # service-side project policy, not by this caller.
+    assert "ai_service_url: ${{ vars.AI_SERVICE_URL }}" in workflow
+    assert "ai_service_audience: ${{ vars.AI_SERVICE_AUDIENCE }}" in workflow
+    assert "ai_service_reviewers_json: ${{ vars.AI_SERVICE_REVIEWERS_JSON }}" in workflow
+    assert "id-token: write" in workflow
     assert "secrets.SNAPSHOT_REPOSITORY_TOKEN || secrets.QSL_REPO_SYNC_TOKEN || github.token" in workflow
