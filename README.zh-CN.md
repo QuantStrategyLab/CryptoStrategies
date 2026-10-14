@@ -63,6 +63,14 @@ CryptoStrategies 是 QuantStrategyLab 的加密货币策略包。为 Binance 执
 
 README 只作为项目地图，不替代最新表现数据。启用或调整 live profile 前，需要重新运行相关 live-pool/release pipeline，并分别看短、中、长周期的收益、最大回撤、相对基准收益、换手、数据新鲜度和 artifact 版本。月度 live-pool 选择、ranking 和 promotion 证据属于 CryptoLivePoolPipelines；本仓库的策略改动应保留这个上游权威边界。证据过期、不完整，或者 profile 仍标记为 research-only，就不要放进 live runtime settings。
 
+## 月度报告审查
+
+月度报告由 [CryptoLivePoolPipelines](https://github.com/QuantStrategyLab/CryptoLivePoolPipelines) 发布。它的 review-only 作业读取同一次运行的已发布月报及上游 selector/shadow 指标，各发起一次 OpenAI 和 Anthropic API 请求，单轮结果写入上游既有 `monthly-review` issue 的评论。CryptoStrategies 不重复运行月审，也不接受自动代码修改；上游指标不能证明下游策略收益或授权 live 提升。
+
+默认每次输入上限 16,000 token、输出上限 2,500 token、超时 60 秒、零重试，UTC 自然月预算 1 美元，调用前通过 issue 评论预留费用。缺少既有 API Secret 时跳过 API 作业；材料缺失、预算不足或 API 失败时发布 `review unavailable`。配置、预算记录和人工审查入口见 [上游运行手册](https://github.com/QuantStrategyLab/CryptoLivePoolPipelines/blob/main/docs/operator_runbook.md#monthly-review-only-api-audit)。该流程不运行 Codex/Cursor CLI，不修改仓库或交易配置。
+
+月报发布任务通过或 issue 已创建，只能证明材料已准备；审查完成需要评论中两家 API 的结果。修复建议必须经过 PR 和 CI。
+
 ## 仓库结构
 
 - `src/`：库代码和运行时代码。
