@@ -63,6 +63,10 @@ Use the platform repositories for broker credentials, dry-run/live switches, ord
 
 Use this README as a map of the project, not as live performance data. Before enabling or changing a live profile, rerun the relevant live-pool/release pipeline and review short, medium, and long windows: return, max drawdown, benchmark-relative return, turnover, data freshness, and artifact version. Monthly live-pool selection, ranking, and promotion evidence belong in CryptoLivePoolPipelines; strategy changes here should preserve that upstream authority. If evidence is stale, incomplete, or the profile is marked research-only, keep it out of live runtime settings.
 
+## Monthly report audit status
+
+The monthly report workflow in CryptoLivePoolPipelines generates review materials and a tracking issue only. It does not automatically dispatch AIAuditBridge, run a dual-AI audit, or apply AI fixes. A green report job or an open issue proves material preparation, not completed AI review. Any proposed fix must go through PR + CI.
+
 ## Repository layout
 
 - `src/`: library and runtime code.
