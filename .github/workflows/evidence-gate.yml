@@ -10,6 +10,8 @@ on:
       - "src/**/combo_manifests.py"
       - "docs/evidence/**"
       - "evidence/**"
+      - "scripts/gate_evidence_package.py"
+      - ".github/workflows/evidence-gate.yml"
 
 permissions:
   contents: read
@@ -74,6 +76,7 @@ jobs:
       - name: Evaluate Evidence Gate
         env:
           GITHUB_BASE_REF: ${{ github.base_ref }}
+          AI_SERVICE_RELEASE_READY: ${{ vars.AI_SERVICE_RELEASE_READY }}
           AI_SERVICE_URL: ${{ vars.AI_SERVICE_URL }}
           AI_SERVICE_AUDIENCE: ${{ vars.AI_SERVICE_AUDIENCE }}
           AI_SERVICE_REVIEWERS_JSON: ${{ vars.AI_SERVICE_REVIEWERS_JSON }}
