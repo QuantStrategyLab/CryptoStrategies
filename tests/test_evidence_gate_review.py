@@ -34,6 +34,7 @@ def _install_reviewer(monkeypatch, result):
 @pytest.fixture
 def evidence(tmp_path, monkeypatch):
     monkeypatch.setenv("GITHUB_SHA", "a" * 40)
+    monkeypatch.setenv("AI_SERVICE_RELEASE_READY", "true")
     monkeypatch.delenv("DUAL_REVIEW_GATE_SKIP", raising=False)
     path = tmp_path / "synthetic.json"
     path.write_text(json.dumps({"strategy_profile": "synthetic"}), encoding="utf-8")
@@ -43,7 +44,8 @@ def evidence(tmp_path, monkeypatch):
 def test_unanimous_advisory_approval_passes(monkeypatch, evidence):
     calls = _install_reviewer(monkeypatch, {"status": "completed", "outcome": "agree_approve", "advisory_only": True})
     assert _load_gate()._run_promotion_dual_review([evidence]) == 0
-    assert len(calls) == 1 and len(set(calls[0][1])) == 3
+    assert len(calls) == 1
+    assert calls[0][1] == ("primary", "secondary", "verification")
 
 
 @pytest.mark.parametrize("result,code", [
@@ -71,3 +73,28 @@ def test_workflow_uses_v2_task_service_only():
         assert retired not in workflow
     assert "AI_SERVICE_URL: ${{ vars.AI_SERVICE_URL }}" in workflow
     assert "id-token: write" in workflow
+
+
+@pytest.mark.parametrize("ready", [None, "", "false", "1", "yes", "invalid"])
+@pytest.mark.parametrize("skip", ["", "true"])
+def test_release_not_ready_blocks_before_dispatch(monkeypatch, evidence, ready, skip):
+    calls = _install_reviewer(monkeypatch, {"status": "completed", "outcome": "agree_approve", "advisory_only": True})
+    if ready is None:
+        monkeypatch.delenv("AI_SERVICE_RELEASE_READY", raising=False)
+    else:
+        monkeypatch.setenv("AI_SERVICE_RELEASE_READY", ready)
+    monkeypatch.setenv("DUAL_REVIEW_GATE_SKIP", skip)
+    assert _load_gate()._run_promotion_dual_review([evidence]) == 3
+    assert calls == []
+
+
+def test_nonpromotion_diff_needs_no_ai_release(monkeypatch):
+    gate = _load_gate()
+    monkeypatch.setattr(gate, "_git_diff", lambda _: "+# documentation only")
+    monkeypatch.delenv("AI_SERVICE_RELEASE_READY", raising=False)
+    assert gate.main() == 0
+
+
+def test_workflow_passes_release_readiness():
+    workflow = (ROOT / ".github" / "workflows" / "evidence-gate.yml").read_text(encoding="utf-8")
+    assert "AI_SERVICE_RELEASE_READY: ${{ vars.AI_SERVICE_RELEASE_READY }}" in workflow

@@ -97,6 +97,9 @@ def _validate_with_promotion_standard(path: Path) -> tuple[bool, list[str]]:
 
 def _run_promotion_dual_review(evidence_files: list[Path]) -> int:
     """Advisory V2 task-service quorum; any unavailable or pending result fails closed."""
+    if os.environ.get("AI_SERVICE_RELEASE_READY", "").strip().lower() != "true":
+        print("[evidence-gate] AI service release is not ready; promotion blocked", file=sys.stderr)
+        return 3
     if str(os.environ.get("DUAL_REVIEW_GATE_SKIP", "")).strip().lower() in {"1", "true", "yes"}:
         print("[evidence-gate] dual-review skipped by DUAL_REVIEW_GATE_SKIP")
         return 0
@@ -118,7 +121,7 @@ def _run_promotion_dual_review(evidence_files: list[Path]) -> int:
                 raise ValueError("caller revision required")
             result = review_material(
                 material, operation_id="crypto-evidence:" + caller_ref + ":" + path.as_posix(),
-                required_roles=("reviewer-primary", "reviewer-secondary", "reviewer-independent"),
+                required_roles=("primary", "secondary", "verification"),
             )
         except Exception:
             print("[evidence-gate] review task unavailable", file=sys.stderr)
