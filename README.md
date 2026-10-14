@@ -63,9 +63,25 @@ Use the platform repositories for broker credentials, dry-run/live switches, ord
 
 Use this README as a map of the project, not as live performance data. Before enabling or changing a live profile, rerun the relevant live-pool/release pipeline and review short, medium, and long windows: return, max drawdown, benchmark-relative return, turnover, data freshness, and artifact version. Monthly live-pool selection, ranking, and promotion evidence belong in CryptoLivePoolPipelines; strategy changes here should preserve that upstream authority. If evidence is stale, incomplete, or the profile is marked research-only, keep it out of live runtime settings.
 
-## Monthly report audit status
+## Monthly report review
 
-The monthly report workflow in CryptoLivePoolPipelines generates review materials and a tracking issue only. It does not automatically dispatch AIAuditBridge, run a dual-AI audit, or apply AI fixes. A green report job or an open issue proves material preparation, not completed AI review. Any proposed fix must go through PR + CI.
+The monthly report is published by
+[CryptoLivePoolPipelines](https://github.com/QuantStrategyLab/CryptoLivePoolPipelines).
+Its review-only audit reads that run's published report and upstream selector/shadow
+metrics, makes one single-turn OpenAI request and one single-turn Anthropic request,
+and posts results to the existing upstream `monthly-review` issue. CryptoStrategies
+does not run a second monthly audit or receive automated code changes. Upstream
+metrics do not establish downstream strategy performance or authorize live promotion.
+
+Defaults are 16,000 input tokens and 2,500 output tokens per request, a 60-second
+timeout, zero retries, and a $1 UTC-month budget reserved in issue comments before
+calls. Missing existing API secrets skips the API job; missing evidence, exhausted
+budget, or API failure produces `review unavailable`. See the
+[upstream runbook](https://github.com/QuantStrategyLab/CryptoLivePoolPipelines/blob/main/docs/operator_runbook.md#monthly-review-only-api-audit)
+for caps, budget accounting, and the human review path. This flow never runs
+Codex/Cursor CLI, edits repositories, or changes trading/live configuration.
+A green publisher or an open issue proves material preparation; completed review
+requires both provider results in the review comment. Proposed fixes require PR + CI.
 
 ## Repository layout
 
