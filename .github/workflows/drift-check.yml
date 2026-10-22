@@ -148,48 +148,10 @@ jobs:
           LIFECYCLE_PREFLIGHT_BUNDLE_ROOT: ${{ runner.temp }}/lifecycle-preflight-bundle
         run: |
           set -euo pipefail
-          python - <<'PY'
-          import json
-          import os
-          import subprocess
-          from pathlib import Path
-
-          profiles = json.loads(
-              subprocess.check_output(
-                  ["python", "scripts/run_walk_forward_backtest.py", "--list-profiles"],
-                  text=True,
-              )
-          )["profiles"]
-          input_root = Path(os.environ["INPUT_ROOT"])
-          bundle_root = Path(os.environ["LIFECYCLE_PREFLIGHT_BUNDLE_ROOT"])
-          store_root = bundle_root / "data" / "lifecycle_store"
-          for profile in profiles:
-              returns_output = (
-                  bundle_root
-                  / "external"
-                  / "CryptoLivePoolPipelines"
-                  / "data"
-                  / "output"
-                  / profile
-                  / "portfolio_and_tracker_returns.csv"
-              )
-              subprocess.check_call(
-                  [
-                      "python",
-                      "scripts/run_walk_forward_backtest.py",
-                      "--profile",
-                      profile,
-                      "--panel",
-                      str(input_root / "research_panel.csv.gz"),
-                      "--market-history",
-                      str(input_root / "market_history.csv.gz"),
-                      "--store-root",
-                      str(store_root),
-                      "--returns-output",
-                      str(returns_output),
-                  ]
-              )
-          PY
+          python scripts/build_lifecycle_preflight.py \
+            --panel "$INPUT_ROOT/research_panel.csv.gz" \
+            --market-history "$INPUT_ROOT/market_history.csv.gz" \
+            --bundle-root "$LIFECYCLE_PREFLIGHT_BUNDLE_ROOT"
 
       - name: Upload lifecycle preflight artifact
         uses: actions/upload-artifact@v7
