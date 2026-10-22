@@ -30,11 +30,10 @@ def test_drift_workflow_wires_real_pipeline_inputs_and_preflight_bundle() -> Non
     ) in workflow
     assert "quant_platform_kit_ref: eae362bd3e3fad5be59a7615eeba10be839a9934" in workflow
     assert "python -m pip install --no-deps -e external/QuantPlatformKit" in workflow
-    assert "scripts/run_walk_forward_backtest.py" in workflow
-    assert '"--list-profiles"' in workflow
-    assert '"--panel"' in workflow
-    assert '"--market-history"' in workflow
-    assert '"--returns-output"' in workflow
+    assert "python scripts/build_lifecycle_preflight.py" in workflow
+    assert '--panel "$INPUT_ROOT/research_panel.csv.gz"' in workflow
+    assert '--market-history "$INPUT_ROOT/market_history.csv.gz"' in workflow
+    assert '--bundle-root "$LIFECYCLE_PREFLIGHT_BUNDLE_ROOT"' in workflow
     assert "Upload lifecycle preflight artifact" in workflow
     assert "lifecycle-preflight-${{ github.run_id }}-${{ github.run_attempt }}" in workflow
     assert workflow.count("github.ref == format('refs/heads/{0}', github.event.repository.default_branch)") == 2
