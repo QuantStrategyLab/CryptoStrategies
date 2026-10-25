@@ -108,6 +108,8 @@ python -m pytest -q
 
 ## Safety and contribution notes
 
+- AI assistants and maintainers follow [AGENTS.md](AGENTS.md).
+
 - Keep secrets, account identifiers, tokens, cookies, and broker credentials out of Git and logs.
 - Prefer small, reviewable changes with tests or reproducible evidence.
 - For strategy changes, include the command or artifact used to validate behavior.
