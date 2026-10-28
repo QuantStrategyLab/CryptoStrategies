@@ -36,6 +36,8 @@ CI also verifies dependency refs and builds the package. The repository
 CONTRIBUTING file uses a local `../QuantPlatformKit` checkout; CI resolves the
 pinned revision instead, so prefer the pinned ref for reproducible results.
 
+Organization documentation rules are checked by `python scripts/check_style.py`, which also runs in CI as the `Documentation check` job.
+
 ## Naming and documentation
 
 - Developer documentation is English by default; Chinese siblings use
