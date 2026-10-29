@@ -1,6 +1,6 @@
 # 加密策略模板
 
-[English](crypto_strategy_template.md)
+[English](crypto-strategy-template.md)
 
 以后新增加密策略时，按这个模板落。
 

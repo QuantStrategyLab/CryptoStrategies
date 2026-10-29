@@ -1,6 +1,6 @@
 # Crypto portability checklist
 
-[简体中文](crypto_portability_checklist.zh-CN.md)
+[简体中文](crypto-portability-checklist.zh-CN.md)
 
 Use this before enabling a crypto profile on any downstream platform.
 
