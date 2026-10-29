@@ -1,6 +1,6 @@
 # Crypto strategy template
 
-[简体中文](crypto_strategy_template.zh-CN.md)
+[简体中文](crypto-strategy-template.zh-CN.md)
 
 Use this template when adding a new crypto strategy profile.
 

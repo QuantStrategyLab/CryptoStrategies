@@ -87,12 +87,12 @@ python -m pytest -q
 
 ## 延伸文档
 
-- [`docs/crypto_cross_platform_strategy_spec.md`](docs/crypto_cross_platform_strategy_spec.md)
-- [`docs/crypto_cross_platform_strategy_spec.zh-CN.md`](docs/crypto_cross_platform_strategy_spec.zh-CN.md)
-- [`docs/crypto_portability_checklist.md`](docs/crypto_portability_checklist.md)
-- [`docs/crypto_portability_checklist.zh-CN.md`](docs/crypto_portability_checklist.zh-CN.md)
-- [`docs/crypto_strategy_template.md`](docs/crypto_strategy_template.md)
-- [`docs/crypto_strategy_template.zh-CN.md`](docs/crypto_strategy_template.zh-CN.md)
+- [`docs/crypto-cross-platform-strategy-spec.md`](docs/crypto-cross-platform-strategy-spec.md)
+- [`docs/crypto-cross-platform-strategy-spec.zh-CN.md`](docs/crypto-cross-platform-strategy-spec.zh-CN.md)
+- [`docs/crypto-portability-checklist.md`](docs/crypto-portability-checklist.md)
+- [`docs/crypto-portability-checklist.zh-CN.md`](docs/crypto-portability-checklist.zh-CN.md)
+- [`docs/crypto-strategy-template.md`](docs/crypto-strategy-template.md)
+- [`docs/crypto-strategy-template.zh-CN.md`](docs/crypto-strategy-template.zh-CN.md)
 
 ## 安全和贡献说明
 

@@ -1,6 +1,6 @@
 # Crypto cross-platform strategy spec
 
-[简体中文](crypto_cross_platform_strategy_spec.zh-CN.md)
+[简体中文](crypto-cross-platform-strategy-spec.zh-CN.md)
 
 This repository now follows the same contract split used by the US equity stack:
 

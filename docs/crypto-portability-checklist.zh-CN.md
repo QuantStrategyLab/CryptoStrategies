@@ -1,6 +1,6 @@
 # 加密策略 portability 清单
 
-[English](crypto_portability_checklist.md)
+[English](crypto-portability-checklist.md)
 
 在某条加密策略真正放到下游平台启用前，先过这张清单。
 

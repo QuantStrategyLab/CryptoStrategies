@@ -1,6 +1,6 @@
 # 加密策略跨平台规范
 
-[English](crypto_cross_platform_strategy_spec.md)
+[English](crypto-cross-platform-strategy-spec.md)
 
 这个仓库现在按照美股那套边界来拆：
 
