@@ -175,7 +175,7 @@ jobs:
       contents: read
       issues: write
       id-token: write
-    uses: QuantStrategyLab/QuantPlatformKit/.github/workflows/reusable-drift-check.yml@7c5a4d615e845e53b02c501689678cb15cf3f9a7
+    uses: QuantStrategyLab/QuantPlatformKit/.github/workflows/reusable-drift-check.yml@474b701dabcb910f085bfff25a41daf5c0a52a5b
     with:
       verification_only: ${{ github.event_name == 'workflow_dispatch' && inputs.verification_only }}
       strategy_domain: crypto
