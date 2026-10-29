@@ -28,6 +28,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     outputs:
+      lifecycle_preflight_artifact: lifecycle-preflight-${{ github.run_id }}-${{ github.run_attempt }}
       snapshot_repository_ref: ${{ steps.snapshot-input.outputs.snapshot_repository_ref }}
     steps:
       - name: Checkout
@@ -187,6 +188,6 @@ jobs:
       ai_service_audience: ${{ vars.AI_SERVICE_AUDIENCE }}
       ai_service_reviewers_json: ${{ vars.AI_SERVICE_REVIEWERS_JSON }}
       quant_platform_kit_ref: eae362bd3e3fad5be59a7615eeba10be839a9934
-      lifecycle_preflight_artifact: lifecycle-preflight-${{ github.run_id }}-${{ github.run_attempt }}
+      lifecycle_preflight_artifact: ${{ needs.preflight_backtests.outputs.lifecycle_preflight_artifact }}
     secrets:
       snapshot_repository_token: ${{ secrets.SNAPSHOT_REPOSITORY_TOKEN || secrets.QSL_REPO_SYNC_TOKEN || github.token }}

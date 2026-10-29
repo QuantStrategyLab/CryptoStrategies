@@ -21,3 +21,7 @@ role therefore does **not** satisfy an independent reviewer requirement.
 Readiness must remain false until routing, admission, and actual independent
 review evidence have been verified by the owner. Renaming roles does not
 establish independence or authorize adoption, deployment, or trading.
+
+The drift job consumes the artifact name recorded by the successful preflight
+job. Rerunning only failed jobs keeps that original artifact binding instead
+of requesting a nonexistent artifact for the new workflow attempt.
