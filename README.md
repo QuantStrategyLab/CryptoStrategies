@@ -64,6 +64,21 @@ trend leg while the BTC leg still produces a target. Without a benchmark mapping
 missing BTC indicators can instead raise before the legs run. Neither case
 grants order authority or implies a universal no-order outcome.
 
+The standalone BTC DCA runtime requires `derived_indicators` in its input
+contract. Even ordinary DCA with both smart sizing and the z-score exit
+explicitly disabled must receive an empty indicator mapping. With either feature
+enabled, its required input must be supplied; missing smart or z-score inputs
+fail closed instead of silently claiming an ordinary plan. The plan uses the
+strategy context time, enforces the configured cash reserve and amount limits,
+and caps additional BTC accumulation by the existing dynamic ratio and 50%
+concentration limit. An existing position above a limit is not automatically
+sold merely to satisfy that cap, and remains subject to the original risk gate.
+Out-of-window z-score exits cannot add a DCA buy. The legacy ratio settings only
+support their published fixed defaults; other values require explicit migration
+rather than being silently ignored. Platform consumers must update their input
+mapping and budget handling before validation; a catalog entry does not prove a
+broker cycle or live authorization.
+
 The standalone trend runtime requires the authoritative `universe_snapshot` and
 a complete BTC daily-indicator benchmark in `derived_indicators`. BTC benchmark
 aliases and symbols outside that pool cannot become rotation candidates. Managed

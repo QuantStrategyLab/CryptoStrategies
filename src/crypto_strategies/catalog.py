@@ -41,6 +41,7 @@ CRYPTO_BTC_DCA_REQUIRED_INPUTS = frozenset(
     {
         "market_prices",
         "portfolio_snapshot",
+        "derived_indicators",
     }
 )
 

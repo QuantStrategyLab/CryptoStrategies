@@ -66,7 +66,7 @@ PLATFORM_RUNTIME_ADAPTERS: dict[str, dict[str, StrategyRuntimeAdapter]] = {
         ),
         "crypto_btc_dca": StrategyRuntimeAdapter(
             status_icon="🪙",
-            available_inputs=frozenset({"market_prices", "portfolio_snapshot"}),
+            available_inputs=frozenset({"market_prices", "portfolio_snapshot", "derived_indicators"}),
             portfolio_input_name="portfolio_snapshot",
             artifact_contract=CRYPTO_BTC_DCA_ARTIFACT_CONTRACT,
         ),

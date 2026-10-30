@@ -604,6 +604,7 @@ def build_rebalance_plan(
     zscore_exit_context: Mapping[str, object] | None = None,
     # Extension
     translator=None,
+    strict_buy_window: bool = False,
 ) -> dict[str, object]:
     """Produce a full rebalance plan for the BTC DCA strategy."""
     symbol = normalize_symbol(signal_symbol)
@@ -743,7 +744,10 @@ def build_rebalance_plan(
         zscore_overlay_applied = False
         zscore_exit["applied"] = False
 
-    planned_investment = float(planned_investment if actionable or zscore_overlay_applied else 0.0)
+    # Standalone validation permits an out-of-window exit, never an extra buy.
+    planned_investment = float(
+        planned_investment if actionable or (zscore_overlay_applied and not strict_buy_window) else 0.0
+    )
 
     # --- Target values ---
     target_btc_value = btc_value
@@ -910,6 +914,7 @@ def compute_signals(
     *,
     derived_indicators: Mapping[str, object] | None = None,
     translator=None,
+    strict_plan: bool = False,
     **kwargs: Any,
 ) -> dict[str, Any]:
     """Compute DCA signals for BTC.
@@ -940,6 +945,7 @@ def compute_signals(
             base_investment_usd=base_amount,
             derived_indicators=derived_indicators,
             translator=translator,
+            **({"strict_buy_window": True} if strict_plan else {}),
             **{
                 k: v
                 for k, v in kwargs.items()
@@ -947,6 +953,8 @@ def compute_signals(
             },
         )
     except (ValueError, TypeError) as exc:
+        if strict_plan:
+            raise
         logger.warning("btc_dca build_rebalance_plan failed, falling back: %s", exc)
         plan = {}
 
@@ -967,6 +975,8 @@ def compute_signals(
     if plan:
         result["metadata"] = {
             "actionable": plan.get("actionable", True),
+            "target_values": plan.get("target_values", {}),
+            "btc_value": plan.get("btc_value"),
             "regime": plan.get("regime", "ordinary_dca"),
             "multiplier": plan.get("multiplier", 1.0),
             "smart_multiplier_enabled": plan.get("smart_multiplier_enabled", smart_enabled),
