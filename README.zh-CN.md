@@ -53,6 +53,23 @@ CryptoStrategies 是 QuantStrategyLab 的加密货币策略包。为 Binance 执
 | `crypto_trend_rotation` | Crypto Trend Rotation | 研究侧重构候选。 |
 | `crypto_equity_combo` | Crypto Equity Combo | 研究侧编排候选。 |
 
+独立的 `full_cycle_no_submit` 允许名单包含 `crypto_btc_dca`、
+`crypto_trend_rotation` 和 `crypto_live_pool_rotation`，仅供有边界的验证使用，
+不授予生产或 live 选择资格。平台验证仍须检查执行已禁用、账户隔离、必要输入和
+券商提交阻断。独立趋势策略在 BTC 基准缺失或无效时拒绝生成目标。组合研究策略
+保留其条件性的回退行为：提供映射形式的 benchmark 时，趋势腿失败仍可能保留
+BTC 腿目标；未提供映射 benchmark 时，缺失 BTC 数据会在组合腿计算前报错。
+因此，这项校验不能证明整个组合策略不产生订单意图。
+
+独立趋势的运行入口要求权威 `universe_snapshot`，并要求 `derived_indicators`
+包含完整的 BTC 日指标基准。BTC 基准及其别名、池外币种均不能成为轮动候选。
+管理信息保留币池和平台投资组合快照提供的正数量持仓；它不新增退出规则，也不
+证明同一账户内的跨策略持仓归属。直接研究调用可省略币池，并从指标行推导非 BTC
+候选。没有显式 regime 时，该独立策略使用收盘价高于 SMA200 的条件，不套用
+live-pool 的均线斜率规则。持仓可见性来自提供的投资组合，不来自行情价格键。
+历史日指标生产者本身不能证明 K 线已收盘或满足 PIT；平台验证路径须单独建立这些
+输入边界。
+
 ## 如何接到执行平台
 
 执行平台通过 strategy loader 和 runtime metadata 消费本策略包。当前下游平台：BinancePlatform。

@@ -456,6 +456,19 @@ def evaluate_crypto_trend_rotation(ctx: StrategyContext) -> StrategyDecision:
     config = _merge_runtime_config(ctx, crypto_trend_rotation_manifest.default_config)
     feature_snapshot = _require_market_data(ctx, "derived_indicators")
     prices = _require_market_data(ctx, "market_prices")
+    universe_snapshot = _require_market_data(ctx, "universe_snapshot")
+    portfolio = _resolve_portfolio_snapshot(ctx)
+    held_symbols = []
+    for position in getattr(portfolio, "positions", ()) or ():
+        symbol = getattr(position, "symbol", None)
+        try:
+            quantity = float(getattr(position, "quantity"))
+        except (AttributeError, TypeError, ValueError):
+            raise ValueError("portfolio position quantity is invalid") from None
+        if not isinstance(symbol, str) or not symbol.strip() or not math.isfinite(quantity) or quantity < 0:
+            raise ValueError("portfolio position is invalid")
+        if quantity > 0:
+            held_symbols.append(symbol)
     translator = _resolve_translator(config)
 
     # Build a feature_snapshot from indicators_map
@@ -469,8 +482,9 @@ def evaluate_crypto_trend_rotation(ctx: StrategyContext) -> StrategyDecision:
 
     weights, signal_desc, is_emergency, debug_str, metadata = compute_signals(
         feature_snapshot=feature_frame,
-        current_holdings=list(prices.keys()),
+        current_holdings=held_symbols,
         translator=translator,
+        universe_snapshot=universe_snapshot,
         trend_pool_size=int(config.get("trend_pool_size", 5)),
         rotation_top_n=int(config.get("rotation_top_n", 2)),
         weight_mode=str(config.get("weight_mode", "inverse_vol")),

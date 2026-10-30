@@ -18,6 +18,8 @@ Enhancements over the original stripped version:
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
+from numbers import Real
 from typing import Any
 
 import pandas as pd
@@ -56,6 +58,25 @@ REQUIRED_FEATURE_COLUMNS = frozenset(
     }
 )
 
+def _is_btc_benchmark_symbol(symbol: str) -> bool:
+    return symbol.strip().upper().replace("-", "").replace(".", "") in {
+        "BTC", "BTCUSD", "BTCUSDT", "BTCUSDTP"
+    }
+
+
+def _non_btc_pool(symbols: object) -> list[str]:
+    if not isinstance(symbols, Sequence) or isinstance(symbols, (str, bytes)):
+        raise ValueError("universe_snapshot must be a sequence of symbols")
+    pool: list[str] = []
+    for symbol in symbols:
+        if not isinstance(symbol, str) or not symbol.strip():
+            raise ValueError("universe_snapshot contains an invalid symbol")
+        normalized = symbol.strip().upper()
+        if not _is_btc_benchmark_symbol(normalized) and normalized not in pool:
+            pool.append(normalized)
+    return pool
+
+
 # --- BTC benchmark extraction ---
 
 
@@ -81,32 +102,40 @@ def _extract_btc_snapshot(indicators_map: dict[str, dict[str, Any]]) -> dict[str
                 break
 
     if btc_data is None:
-        # Return a default "regime on" snapshot so rotation can proceed
-        return {
-            "regime_on": True,
-            "btc_roc20": 0.05,
-            "btc_roc60": 0.10,
-            "btc_roc120": 0.20,
-        }
+        raise ValueError("BTC benchmark is required")
 
-    roc20 = coerce_float(btc_data.get("roc20"), default=0.05)
-    roc60 = coerce_float(btc_data.get("roc60"), default=0.05)
-    roc120 = coerce_float(btc_data.get("roc120"), default=0.05)
-    close = coerce_float(btc_data.get("close"), default=0.0)
-    sma200 = coerce_float(btc_data.get("sma200"), default=0.0)
+    if any(pd.api.types.is_bool(btc_data.get(key)) for key in ("close", "sma200", "roc20", "roc60", "roc120")):
+        raise ValueError("BTC benchmark fields must be numeric, not boolean")
+    values = {
+        key: coerce_float(btc_data.get(key), default=float("nan"))
+        for key in ("close", "sma200", "roc20", "roc60", "roc120")
+    }
+    if not all(math.isfinite(value) for value in values.values()):
+        raise ValueError("BTC benchmark fields must be finite")
+    if values["close"] <= 0.0 or values["sma200"] <= 0.0:
+        raise ValueError("BTC benchmark close and sma200 must be positive")
 
-    # Regime on = BTC price above SMA200 (long-term uptrend)
-    regime_on = bool(close > sma200 if sma200 > 0 else True)
-    # Also check explicit regime field if present
-    explicit_regime = btc_data.get("regime_on")
-    if explicit_regime is not None:
-        regime_on = coerce_bool(explicit_regime, default=True)
+    regime_on = values["close"] > values["sma200"]
+    if "regime_on" in btc_data:
+        explicit = btc_data["regime_on"]
+        if pd.api.types.is_bool(explicit):
+            regime_on = bool(explicit)
+        elif isinstance(explicit, str) and explicit.strip().lower() in {
+            "1", "true", "yes", "y", "on", "0", "false", "no", "n", "off"
+        }:
+            regime_on = coerce_bool(explicit)
+        elif isinstance(explicit, Real) and explicit in (0, 1):
+            regime_on = bool(explicit)
+        else:
+            raise ValueError("BTC benchmark regime_on must be boolean")
 
     return {
         "regime_on": regime_on,
-        "btc_roc20": float(roc20),
-        "btc_roc60": float(roc60),
-        "btc_roc120": float(roc120),
+        "close": values["close"],
+        "sma200": values["sma200"],
+        "btc_roc20": values["roc20"],
+        "btc_roc60": values["roc60"],
+        "btc_roc120": values["roc120"],
     }
 
 
@@ -215,6 +244,12 @@ def _to_indicator_frame(feature_snapshot) -> pd.DataFrame:
             f"feature_snapshot missing required columns: {', '.join(sorted(missing))}"
         )
     frame["symbol"] = frame["symbol"].astype(str).str.strip().str.upper()
+    btc_rows = frame["symbol"].str.replace("-", "", regex=False).str.replace(".", "", regex=False).isin(
+        {"BTC", "BTCUSD", "BTCUSDT", "BTCUSDTP"}
+    )
+    for col in ("close", "sma200", "roc20", "roc60", "roc120"):
+        if any(pd.api.types.is_bool(value) for value in frame.loc[btc_rows, col]):
+            raise ValueError("BTC benchmark fields must be numeric, not boolean")
     for col in REQUIRED_FEATURE_COLUMNS - {"symbol"}:
         frame[col] = pd.to_numeric(frame[col], errors="coerce")
     frame = frame.dropna(subset=["close", "sma20", "vol20"])
@@ -289,9 +324,12 @@ def build_target_weights(
     if blocked:
         return {}
 
+    eligible_universe = _non_btc_pool(universe_snapshot)
+    if not eligible_universe:
+        return {}
     trend_pool = resolve_authoritative_rotation_pool(
         state,
-        trend_universe_symbols=list(universe_snapshot),
+        trend_universe_symbols=eligible_universe,
         trend_pool_size=trend_pool_size,
         allow_refresh=allow_refresh,
     )
@@ -349,6 +387,7 @@ def compute_signals(
     current_holdings,
     *,
     translator: Any | None = None,
+    universe_snapshot: Sequence[str] | None = None,
     **kwargs: Any,
 ) -> tuple[dict[str, float] | None, str, bool, str, dict[str, Any]]:
     """Compute trend-rotation signals from a feature snapshot.
@@ -386,11 +425,16 @@ def compute_signals(
     }
 
     frame = _to_indicator_frame(feature_snapshot)
-    universe_symbols = list(frame.index)
+    if frame.index.has_duplicates:
+        raise ValueError("feature_snapshot contains duplicate symbols")
+    universe_symbols = _non_btc_pool(list(frame.index) if universe_snapshot is None else universe_snapshot)
+    if universe_snapshot is not None and (not universe_symbols or not set(universe_symbols).issubset(frame.index)):
+        raise ValueError("universe_snapshot must contain available non-BTC symbols")
+    managed_symbols = list(dict.fromkeys(universe_symbols + _non_btc_pool(current_holdings)))
     prices = frame["close"].to_dict()
 
     indicators_map: dict[str, dict[str, Any]] = {}
-    for symbol in universe_symbols:
+    for symbol in frame.index:
         row = frame.loc[symbol]
         indicators_map[symbol] = {col: row[col] for col in row.index}
 
@@ -415,7 +459,7 @@ def compute_signals(
             signal_desc,
             False,
             "no_candidates",
-            {"managed_symbols": tuple(universe_symbols), "profile": PROFILE_NAME},
+            {"managed_symbols": tuple(managed_symbols), "profile": PROFILE_NAME},
         )
 
     weights = {sym: float(payload["weight"]) for sym, payload in selected.items()}
@@ -431,7 +475,7 @@ def compute_signals(
     )
 
     metadata: dict[str, Any] = {
-        "managed_symbols": tuple(universe_symbols),
+        "managed_symbols": tuple(managed_symbols),
         "profile": PROFILE_NAME,
         "selected_count": len(selected),
         "selected_candidates": {
@@ -466,7 +510,8 @@ def extract_managed_symbols(
     Returns
     -------
     tuple[str, ...]
-        Sorted, deduplicated symbol list.
+        Sorted, deduplicated non-BTC symbol list. This helper derives from
+        feature rows; runtime-managed visibility is set by ``compute_signals``.
     """
     _ = benchmark_symbol, kwargs
     del benchmark_symbol
@@ -483,7 +528,7 @@ def extract_managed_symbols(
         set(
             str(s).strip().upper()
             for s in frame["symbol"].dropna().unique()
-            if s
+            if s and not _is_btc_benchmark_symbol(str(s))
         )
     )
     return tuple(symbols)
