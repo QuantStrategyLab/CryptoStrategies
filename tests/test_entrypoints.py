@@ -5,6 +5,8 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
+import numpy as np
+
 from quant_platform_kit import PortfolioSnapshot, Position
 from quant_platform_kit.risk import gate as qpk_risk_gate
 from quant_platform_kit.risk.contracts import CandidateRiskIdentity
@@ -85,6 +87,213 @@ def _fresh_as_of() -> datetime:
 
 
 class CryptoStrategyEntrypointTests(unittest.TestCase):
+    def test_btc_entrypoint_accepts_translator_without_duplicate_keyword(self) -> None:
+        from crypto_strategies.strategies import crypto_btc_dca
+
+        entrypoint = get_strategy_entrypoint("crypto_btc_dca")
+        from crypto_strategies.runtime_adapters import get_platform_runtime_adapter
+        adapter = get_platform_runtime_adapter("crypto_btc_dca", platform_id="binance")
+        self.assertIn("derived_indicators", adapter.available_inputs)
+        self.assertIn("derived_indicators", entrypoint.manifest.required_inputs)
+        from crypto_strategies.catalog import get_strategy_definition
+        self.assertIn("derived_indicators", get_strategy_definition("crypto_btc_dca").required_inputs)
+        indicators = {"BTCUSDT": {"close": 60000.0, "sma200": 50000.0,
+                                   "high252": 65000.0, "ahr999": 0.7}}
+        snapshot = PortfolioSnapshot(as_of=_fresh_as_of(), total_equity=1000.0,
+                                     buying_power=1000.0, cash_balance=1000.0,
+                                     metadata={"observed_effective_exposure": 0.0,
+                                               "btc_zscore_exit": {"route": "normal"}})
+        market = {"market_prices": {"BTCUSDT": 60000.0},
+                  "derived_indicators": indicators, "portfolio_snapshot": snapshot}
+        artifacts = _synthetic_risk_artifacts("crypto_btc_dca", "BTCUSDT")
+        from quant_platform_kit.common.runtime_inputs import build_strategy_evaluation_inputs
+        from quant_platform_kit.common.strategy_contracts import build_strategy_context_from_available_inputs
+        inputs = build_strategy_evaluation_inputs(available_inputs=adapter.available_inputs,
+            market_inputs=market, portfolio_snapshot=snapshot)
+        mapped = build_strategy_context_from_available_inputs(entrypoint=entrypoint, runtime_adapter=adapter,
+            as_of=_fresh_as_of(), available_inputs=inputs)
+        self.assertIs(mapped.market_data["derived_indicators"], indicators)
+        def translator(key, **_kwargs):
+            return key
+
+        decisions = []
+        for config in ({}, {"translator": translator}):
+            ctx = StrategyContext(as_of=_fresh_as_of(), market_data=market, state={},
+                                  runtime_config=config, artifacts=artifacts)
+            with patch("crypto_strategies.entrypoints.record_strategy_decision"), patch.object(
+                crypto_btc_dca, "compute_signals", wraps=crypto_btc_dca.compute_signals
+            ) as compute:
+                decision = _evaluate_once(entrypoint, ctx)
+            self.assertIs(compute.call_args.kwargs["derived_indicators"], indicators)
+            if config:
+                self.assertIs(compute.call_args.kwargs["translator"], translator)
+            self.assertEqual(decision.diagnostics["member_risk_assessment"]["outcome"], "APPROVE")
+            decisions.append(decision)
+        self.assertEqual(decisions[0].positions, decisions[1].positions)
+        self.assertEqual(decisions[0].diagnostics["btc_target_ratio"],
+                         decisions[1].diagnostics["btc_target_ratio"])
+
+    def test_btc_default_plan_reaches_risk_gate_and_respects_window_and_cash(self) -> None:
+        entrypoint = get_strategy_entrypoint("crypto_btc_dca")
+        now = _fresh_as_of().replace(day=25)
+        snapshot = PortfolioSnapshot(as_of=now, total_equity=1000.0, buying_power=1000.0,
+                                     cash_balance=1000.0, metadata={"observed_effective_exposure": 0.0,
+                                         "btc_zscore_exit": {"route": "normal"}})
+        artifacts = _synthetic_risk_artifacts("crypto_btc_dca", "BTCUSDT")
+        mandate = artifacts["mandate_provenance"]
+        mandate["effective_at"] = (now - timedelta(minutes=1)).isoformat().replace("+00:00", "Z")
+        mandate["expires_at"] = (now + timedelta(minutes=1)).isoformat().replace("+00:00", "Z")
+        market = {"market_prices": {"BTCUSDT": 60000.0}, "portfolio_snapshot": snapshot,
+                  "derived_indicators": {"BTCUSDT": {"close": 60000.0, "sma200": 50000.0, "ahr999": .7}}}
+        ctx = StrategyContext(as_of=now, market_data=market, state={}, artifacts=artifacts)
+        with patch("crypto_strategies.entrypoints.record_strategy_decision"), \
+             patch.object(qpk_risk_gate, "_utc_now", return_value=now):
+            decision = _evaluate_once(entrypoint, ctx)
+        self.assertEqual(decision.diagnostics["member_risk_assessment"]["outcome"], "APPROVE")
+        self.assertTrue(decision.diagnostics["in_execution_window"])
+        self.assertGreater(decision.diagnostics["planned_investment_usd"], 0.0)
+        self.assertLessEqual(decision.diagnostics["planned_investment_usd"], 1000.0)
+        self.assertAlmostEqual(decision.positions[0].target_weight,
+                               decision.diagnostics["planned_investment_usd"] / 1000.0)
+        self.assertEqual(decision.budgets[0].amount, decision.diagnostics["planned_investment_usd"])
+        self.assertEqual(decision.diagnostics["btc_value_usd"], 0.0)
+        self.assertEqual(decision.diagnostics["target_btc_value_usd"], decision.budgets[0].amount)
+        with patch("crypto_strategies.entrypoints.record_strategy_decision"), \
+             patch.object(qpk_risk_gate, "_utc_now", return_value=now):
+            capped = _evaluate_once(entrypoint, StrategyContext(as_of=now, market_data=market,
+                state={}, artifacts=artifacts, runtime_config={"cash_reserve_usd": 950.0,
+                                                               "max_investment_usd": 40.0}))
+        self.assertEqual(capped.diagnostics["planned_investment_usd"], 40.0)
+        self.assertAlmostEqual(capped.positions[0].target_weight, .04)
+        no_holdings = PortfolioSnapshot(as_of=now, total_equity=1000.0, buying_power=1000.0,
+                                        cash_balance=1000.0, metadata={"observed_effective_exposure": 0.0,
+                                            "btc_zscore_exit": {"route": "risk_off"}})
+        with patch("crypto_strategies.entrypoints.record_strategy_decision"), \
+             patch.object(qpk_risk_gate, "_utc_now", return_value=now):
+            risk_off = _evaluate_once(entrypoint, StrategyContext(as_of=now,
+                market_data={**market, "portfolio_snapshot": no_holdings}, state={}, artifacts=artifacts))
+        self.assertEqual(risk_off.diagnostics["planned_investment_usd"], 0.0)
+        self.assertEqual(risk_off.diagnostics["target_btc_value_usd"], 0.0)
+        self.assertIn("no_execute", risk_off.risk_flags)
+        off_day = now.replace(day=10)
+        snapshot = PortfolioSnapshot(as_of=off_day, total_equity=1000.0, buying_power=1000.0,
+                                     cash_balance=1000.0, metadata={"observed_effective_exposure": 0.0,
+                                         "btc_zscore_exit": {"route": "normal"}})
+        mandate["effective_at"] = (off_day - timedelta(minutes=1)).isoformat().replace("+00:00", "Z")
+        mandate["expires_at"] = (off_day + timedelta(minutes=1)).isoformat().replace("+00:00", "Z")
+        with patch("crypto_strategies.entrypoints.record_strategy_decision"), \
+             patch.object(qpk_risk_gate, "_utc_now", return_value=off_day):
+            off = _evaluate_once(entrypoint, StrategyContext(as_of=off_day,
+                market_data={**market, "portfolio_snapshot": snapshot}, state={}, artifacts=artifacts))
+        self.assertFalse(off.diagnostics["in_execution_window"])
+        self.assertEqual(off.diagnostics["planned_investment_usd"], 0.0)
+        self.assertIn("no_execute", off.risk_flags)
+        self.assertEqual(off.budgets[0].amount, 0.0)
+        held = PortfolioSnapshot(as_of=off_day, total_equity=1000.0, buying_power=900.0,
+                                 cash_balance=900.0,
+                                 positions=(Position(symbol="BTCUSDT", quantity=100.0 / 60000.0, market_value=100.0),),
+                                 metadata={"observed_effective_exposure": .1,
+                                           "btc_zscore_exit": {"route": "risk_off"}})
+        with patch("crypto_strategies.entrypoints.record_strategy_decision"), \
+             patch.object(qpk_risk_gate, "_utc_now", return_value=off_day):
+            exit_decision = _evaluate_once(entrypoint, StrategyContext(as_of=off_day,
+                market_data={**market, "portfolio_snapshot": held}, state={}, artifacts=artifacts))
+        self.assertAlmostEqual(exit_decision.positions[0].target_weight, .025)
+        self.assertEqual(exit_decision.diagnostics["btc_value_usd"], 100.0)
+        self.assertEqual(exit_decision.diagnostics["target_btc_value_usd"], 25.0)
+        self.assertTrue(exit_decision.diagnostics["zscore_exit"]["applied"])
+        self.assertEqual(exit_decision.budgets[0].amount, 0.0)
+        oversized = PortfolioSnapshot(as_of=now, total_equity=1000.0, buying_power=100.0,
+                                      cash_balance=100.0,
+                                      positions=(Position(symbol="BTCUSDT", quantity=.015, market_value=900.0),),
+                                      metadata={"observed_effective_exposure": .9,
+                                                "btc_zscore_exit": {"route": "normal"}})
+        mandate["effective_at"] = (now - timedelta(minutes=1)).isoformat().replace("+00:00", "Z")
+        mandate["expires_at"] = (now + timedelta(minutes=1)).isoformat().replace("+00:00", "Z")
+        with patch("crypto_strategies.entrypoints.record_strategy_decision"), \
+             patch.object(qpk_risk_gate, "_utc_now", return_value=now):
+            held_decision = _evaluate_once(entrypoint, StrategyContext(as_of=now,
+                market_data={**market, "portfolio_snapshot": oversized}, state={}, artifacts=artifacts))
+        self.assertAlmostEqual(held_decision.diagnostics["btc_target_ratio"], .9)
+        self.assertEqual(held_decision.diagnostics["planned_investment_usd"], 0.0)
+        self.assertIn("no_execute", held_decision.risk_flags)
+        self.assertIn("rejected:strategy_concentration", held_decision.risk_flags)
+        self.assertEqual(held_decision.positions, ())
+        self.assertEqual(held_decision.budgets, ())
+
+    def test_btc_entrypoint_rejects_invalid_or_unsupported_plan_configuration(self) -> None:
+        entrypoint = get_strategy_entrypoint("crypto_btc_dca")
+        now = _fresh_as_of()
+        snapshot = PortfolioSnapshot(as_of=now, total_equity=1000.0, buying_power=1000.0,
+                                     cash_balance=1000.0, metadata={"observed_effective_exposure": 0.0,
+                                         "btc_zscore_exit": {"route": "normal"}})
+        market = {"market_prices": {"BTCUSDT": 60000.0}, "portfolio_snapshot": snapshot,
+                  "derived_indicators": {"BTCUSDT": {"close": 60000.0, "sma200": 50000.0, "ahr999": .7}}}
+        for config in ({"target_ratio_max": .7}, {"cash_reserve_usd": float("nan")},
+                       {"cadence": "daily"}, {"mystery_cash_cap": 100},
+                       {"smart_multiplier_enabled": "unexpected"}, {"mild_drawdown_threshold": float("nan")},
+                       {"signal_symbol": "ETHUSDT"}, {"zscore_exit_risk_off_exposure": 2.0},
+                       {"zscore_exit_risk_reduced_exposure": 1.1}, {"monthly_day": 0},
+                       {"monthly_day": 999}, {"quarterly_months": "1,garbage"},
+                       {"zscore_exit_allow_outside_execution_window": "no"}):
+            with self.subTest(config=config), self.assertRaises(ValueError):
+                entrypoint.evaluate(StrategyContext(as_of=now, market_data=market, state={},
+                                                    runtime_config=config))
+        # Ordinary DCA is available only when both optional features are explicitly disabled.
+        with patch("crypto_strategies.entrypoints.record_strategy_decision"):
+            ordinary = _evaluate_once(entrypoint, StrategyContext(as_of=now,
+                market_data={**market, "derived_indicators": {}}, state={},
+                runtime_config={"smart_multiplier_enabled": False, "zscore_exit_enabled": False},
+                artifacts=_synthetic_risk_artifacts("crypto_btc_dca", "BTCUSDT")))
+        self.assertFalse(ordinary.diagnostics["smart_multiplier_enabled"])
+        with self.assertRaisesRegex(ValueError, "smart cycle input"):
+            entrypoint.evaluate(StrategyContext(as_of=now,
+                market_data={**market, "derived_indicators": {}}, state={}))
+        for invalid in ({"close": 60000.0, "sma200": 50000.0},
+                        {"close": -1.0, "sma200": 50000.0, "ahr999": .7},
+                        {"close": 60000.0, "sma200": 50000.0, "ahr999": True},
+                        {" close ": True, "sma200": 50000.0, "ahr999": .7},
+                        {"close": np.bool_(True), "sma200": 50000.0, "ahr999": .7}):
+            with self.subTest(indicator=invalid), self.assertRaises(ValueError):
+                entrypoint.evaluate(StrategyContext(as_of=now,
+                    market_data={**market, "derived_indicators": {"BTCUSDT": invalid}}, state={}))
+        # The drawdown smart branch requires real drawdown/high and RSI evidence.
+        for indicator in ({"close": 60000.0, "sma200": 50000.0},
+                          {"close": 60000.0, "sma200": 50000.0, "high252": 65000.0},
+                          {"close": 60000.0, "sma200": 50000.0, "rsi14": 40.0},
+                          *({"close": 60000.0, "sma200": 50000.0, "high252": 65000.0,
+                             "rsi14": 40.0, "drawdown_252d": value} for value in (True, -.1, 1.1))):
+            with self.subTest(drawdown_indicator=indicator), self.assertRaises(ValueError):
+                entrypoint.evaluate(StrategyContext(as_of=now,
+                    market_data={**market, "derived_indicators": {"BTCUSDT": indicator}},
+                    runtime_config={"cycle_indicator_enabled": False}, state={}))
+        for value, recorded, buying_power, cash in (
+            (float("nan"), None, 800.0, 800.0), (-10.0, None, 800.0, 800.0),
+            (400.0, 0.0, 600.0, 600.0), (0.0, 0.0, 800.0, 100.0),
+        ):
+            position = SimpleNamespace(symbol="BTCUSDT", quantity=value / 60000.0, market_value=value)
+            meta = {"observed_effective_exposure": 0.0, "btc_zscore_exit": {"route": "normal"}}
+            if recorded is not None:
+                meta["dca_value"] = recorded
+            bad_snapshot = SimpleNamespace(total_equity=1000.0, buying_power=buying_power,
+                                           cash_balance=cash, positions=(position,), metadata=meta)
+            with self.subTest(value=value, recorded=recorded, cash=cash), self.assertRaises(ValueError):
+                entrypoint.evaluate(StrategyContext(as_of=now,
+                    market_data={**market, "portfolio_snapshot": bad_snapshot}, state={}))
+        for route in ({"route": "risk_off", "target_allocations": {"BTCUSDT": 1.0}},
+                      {"route": "risk_reduced", "target_allocations": {"BTCUSDT": float("nan")}},
+                      {"route": "risk_off", "target_allocations": {"BTCUSDT": True}}):
+            invalid_exit = PortfolioSnapshot(as_of=now, total_equity=1000.0, buying_power=1000.0,
+                cash_balance=1000.0, metadata={"observed_effective_exposure": 0.0, "btc_zscore_exit": route})
+            with self.subTest(exit_route=route), self.assertRaises(ValueError):
+                entrypoint.evaluate(StrategyContext(as_of=now,
+                    market_data={**market, "portfolio_snapshot": invalid_exit}, state={}))
+        no_zscore = PortfolioSnapshot(as_of=now, total_equity=1000.0, buying_power=1000.0,
+                                     cash_balance=1000.0, metadata={"observed_effective_exposure": 0.0})
+        with self.assertRaisesRegex(ValueError, "z-score exit input"):
+            entrypoint.evaluate(StrategyContext(as_of=now,
+                market_data={**market, "portfolio_snapshot": no_zscore}, state={}))
+
     def test_trend_entrypoint_uses_authoritative_pool_and_keeps_held_positions_visible(self) -> None:
         entrypoint = get_strategy_entrypoint("crypto_trend_rotation")
         def row(close, roc):

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from copy import deepcopy
+import inspect
 import math
 
 from quant_platform_kit.common.strategy_contracts import (
@@ -362,7 +363,11 @@ crypto_live_pool_rotation_entrypoint = CallableStrategyEntrypoint(
 # ---------------------------------------------------------------------------
 
 def evaluate_crypto_btc_dca(ctx: StrategyContext) -> StrategyDecision:
-    from crypto_strategies.strategies.crypto_btc_dca import compute_signals
+    from pandas.api.types import is_bool
+    from crypto_strategies.strategies.crypto_btc_dca import (
+        _cycle_metrics_from_payload, _find_zscore_exit_payload, _indicator_from_payload, _resolve_indicator_payload,
+        build_rebalance_plan, compute_signals,
+    )
 
     config = _merge_runtime_config(ctx, crypto_btc_dca_manifest.default_config)
     prices = _require_market_data(ctx, "market_prices")
@@ -372,6 +377,161 @@ def evaluate_crypto_btc_dca(ctx: StrategyContext) -> StrategyDecision:
     derived_indicators = ctx.market_data.get("derived_indicators")
     translator = _resolve_translator(config)
 
+    legacy_defaults = {
+        "target_ratio_min": 0.0, "target_ratio_max": 0.65, "ratio_base": 0.14,
+        "ratio_scale": 0.16, "equity_normalizer": 10000.0,
+    }
+    for key, expected in legacy_defaults.items():
+        value = config.get(key)
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or value != expected:
+            raise ValueError(f"unsupported BTC legacy parameter: {key}")
+    plan_fields = set(inspect.signature(build_rebalance_plan).parameters) - {
+        "portfolio", "as_of", "derived_indicators", "translator", "strict_buy_window"
+    }
+    platform_fields = {"translator", "now_utc", "allow_new_trend_entries", "allow_rotation_refresh",
+                       "get_symbol_trade_state_fn", "set_symbol_trade_state_fn"}
+    if set(config) - plan_fields - set(legacy_defaults) - platform_fields:
+        raise ValueError("unsupported BTC runtime configuration")
+    if ctx.as_of is None:
+        raise ValueError("BTC strategy as_of is required")
+    if not math.isfinite(total_equity) or total_equity <= 0:
+        raise ValueError("BTC strategy total_equity must be positive and finite")
+    for key in ("base_investment_usd", "max_investment_usd", "cash_reserve_usd", "min_investment_usd"):
+        value = config.get(key)
+        if value is None and key == "max_investment_usd":
+            continue
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
+            raise ValueError(f"invalid BTC investment configuration: {key}")
+    for key, default in crypto_btc_dca_manifest.default_config.items():
+        if key in legacy_defaults or isinstance(default, bool) or not isinstance(default, (int, float)):
+            continue
+        value = config.get(key)
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
+            raise ValueError(f"invalid BTC numeric configuration: {key}")
+    for key, low, high in (("monthly_day", 1, 31), ("monthly_window_calendar_days", 1, 31),
+                           ("weekly_day", 0, 6), ("weekly_window_calendar_days", 1, 7),
+                           ("quarterly_day", 1, 31), ("quarterly_window_calendar_days", 1, 31)):
+        value = config.get(key)
+        if isinstance(value, bool) or not isinstance(value, int) or not low <= value <= high:
+            raise ValueError(f"invalid BTC schedule configuration: {key}")
+    months = config.get("quarterly_months")
+    if isinstance(months, str):
+        months = months.replace(";", ",").split(",")
+    if not isinstance(months, (list, tuple)) or not months:
+        raise ValueError("invalid BTC quarterly months")
+    parsed_months = []
+    for month in months:
+        if isinstance(month, bool) or not (isinstance(month, int) or
+                (isinstance(month, str) and month.strip().isdigit())):
+            raise ValueError("invalid BTC quarterly months")
+        parsed_months.append(int(month))
+    if any(not 1 <= month <= 12 for month in parsed_months) or len(set(parsed_months)) != len(parsed_months):
+        raise ValueError("invalid BTC quarterly months")
+    for key in ("zscore_exit_risk_reduced_exposure", "zscore_exit_risk_off_exposure"):
+        if not 0.0 <= config[key] <= 1.0:
+            raise ValueError(f"invalid BTC exit exposure: {key}")
+    if not isinstance(config.get("zscore_exit_allow_outside_execution_window"), bool):
+        raise ValueError("invalid BTC exit window configuration")
+
+    def finite_nonnegative(value):
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
+            raise ValueError("invalid BTC portfolio snapshot")
+        return float(value)
+
+    snapshot_equity = finite_nonnegative(getattr(portfolio, "total_equity", None))
+    available = finite_nonnegative(getattr(portfolio, "buying_power", None))
+    cash_balance = finite_nonnegative(getattr(portfolio, "cash_balance", None))
+    if not math.isclose(snapshot_equity, total_equity, rel_tol=1e-9, abs_tol=1e-6) or available > cash_balance:
+        raise ValueError("inconsistent BTC portfolio snapshot")
+    if not isinstance(prices, Mapping):
+        raise ValueError("invalid BTC market prices")
+    btc_price = finite_nonnegative(prices.get("BTCUSDT"))
+    if btc_price <= 0:
+        raise ValueError("invalid BTC market prices")
+    btc_market_value = 0.0
+    btc_positions = 0
+    for position in getattr(portfolio, "positions", ()) or ():
+        if str(getattr(position, "symbol", "")).strip().upper() != "BTCUSDT":
+            continue
+        btc_positions += 1
+        quantity = finite_nonnegative(getattr(position, "quantity", None))
+        value = finite_nonnegative(getattr(position, "market_value", None))
+        if (quantity == 0) != (value == 0):
+            raise ValueError("inconsistent BTC portfolio position")
+        if not math.isclose(quantity * btc_price, value, rel_tol=1e-9, abs_tol=1e-6):
+            raise ValueError("inconsistent BTC portfolio position")
+        btc_market_value += value
+    if btc_positions > 1 or btc_market_value > total_equity:
+        raise ValueError("inconsistent BTC portfolio position")
+    portfolio_metadata = getattr(portfolio, "metadata", {}) or {}
+    if not isinstance(portfolio_metadata, Mapping):
+        raise ValueError("invalid BTC portfolio metadata")
+    account_metadata = portfolio_metadata.get("account_metrics")
+    for source in (portfolio_metadata, account_metadata):
+        if source is None:
+            continue
+        if not isinstance(source, Mapping):
+            raise ValueError("invalid BTC portfolio metadata")
+        if "dca_value" in source and not math.isclose(
+            finite_nonnegative(source["dca_value"]), btc_market_value, rel_tol=1e-9, abs_tol=1e-6
+        ):
+            raise ValueError("inconsistent BTC portfolio position")
+    if str(config.get("signal_symbol", "BTCUSDT")).strip().upper() != "BTCUSDT":
+        raise ValueError("unsupported BTC signal symbol")
+    for key in ("smart_multiplier_enabled", "cycle_indicator_enabled", "zscore_exit_enabled"):
+        if not isinstance(config.get(key), bool):
+            raise ValueError(f"invalid BTC boolean configuration: {key}")
+    if config.get("smart_multiplier_enabled") is True:
+        payload = _resolve_indicator_payload(derived_indicators, "BTCUSDT")
+        if not isinstance(payload, Mapping) or any(
+            is_bool(value) for key, value in payload.items()
+            if str(key).strip().lower() in {"close", "price", "last", "last_price", "sma200", "ma200",
+                                    "sma_200", "ahr999", "ahr_999", "ahr999_gma", "ahr999_index"}
+        ):
+            raise ValueError("BTC smart cycle input is unavailable")
+        indicator = _indicator_from_payload("BTCUSDT", payload)
+        if not indicator or any(not math.isfinite(float(indicator.get(key) or 0.0))
+                                or float(indicator.get(key) or 0.0) <= 0.0
+                                for key in ("price", "sma200")):
+            raise ValueError("BTC smart indicator input is unavailable")
+        if config.get("cycle_indicator_enabled") is False:
+            normalized_payload = {str(key).strip().lower(): value for key, value in payload.items()}
+            def first_numeric(keys):
+                for key in keys:
+                    if key in normalized_payload:
+                        value = normalized_payload[key]
+                        if is_bool(value):
+                            return None
+                        try:
+                            value = float(value)
+                        except (TypeError, ValueError):
+                            return None
+                        return value if math.isfinite(value) else None
+                return None
+            high = first_numeric(("high252", "high_252", "high252d", "high_252d"))
+            drawdown = first_numeric(("drawdown_252d", "drawdown252", "drawdown"))
+            rsi = first_numeric(("rsi14", "rsi_14", "rsi"))
+            high_supplied = any(key in normalized_payload for key in ("high252", "high_252", "high252d", "high_252d"))
+            drawdown_supplied = any(key in normalized_payload for key in ("drawdown_252d", "drawdown252", "drawdown"))
+            if ((not high_supplied and not drawdown_supplied)
+                    or (high_supplied and (high is None or high <= 0))
+                    or (drawdown_supplied and (drawdown is None or not 0 <= drawdown <= 1))
+                    or rsi is None or not 0 <= rsi <= 100):
+                raise ValueError("BTC drawdown or RSI input is unavailable")
+        if config.get("cycle_indicator_enabled") is True:
+            # Do not substitute an estimated price-derived value for missing AHR input.
+            direct_ahr = next((payload.get(key) for key in
+                               ("ahr999_gma", "ahr999", "ahr_999", "ahr999_index")
+                               if payload.get(key) is not None), None)
+            try:
+                direct_ahr = float(direct_ahr)
+            except (TypeError, ValueError):
+                raise ValueError("BTC smart cycle input is unavailable") from None
+            metrics = _cycle_metrics_from_payload(payload, as_of=ctx.as_of)
+            ahr = metrics.get("ahr999")
+            if (not math.isfinite(direct_ahr) or direct_ahr <= 0 or not isinstance(ahr, (int, float))
+                    or not math.isfinite(ahr) or ahr <= 0):
+                raise ValueError("BTC smart cycle input is unavailable")
     result = compute_signals(
         prices=prices,
         portfolio=portfolio,
@@ -379,25 +539,76 @@ def evaluate_crypto_btc_dca(ctx: StrategyContext) -> StrategyDecision:
         state=dict(ctx.state),
         derived_indicators=derived_indicators,
         translator=translator,
-        **config,
+        strict_plan=True,
+        as_of=ctx.as_of,
+        **{key: value for key, value in config.items() if key in plan_fields},
     )
-
-    btc_target_ratio = float(result.get("btc_target_ratio", 0.0))
-    metadata = result.get("metadata", {}) if isinstance(result.get("metadata"), dict) else {}
-
-    positions = [
-        PositionTarget(
-            symbol="BTCUSDT",
-            target_weight=btc_target_ratio,
-            role="core",
-        ),
-    ]
-
+    metadata = result.get("metadata")
+    if not isinstance(metadata, Mapping) or type(metadata.get("actionable")) is not bool:
+        raise ValueError("BTC rebalance plan is unavailable")
+    zscore = metadata.get("zscore_exit")
+    if config.get("zscore_exit_enabled") is True and (
+        not isinstance(zscore, Mapping) or zscore.get("found") is not True or zscore.get("active") is not True
+    ):
+        raise ValueError("BTC z-score exit input is unavailable")
+    if config.get("zscore_exit_enabled") is True:
+        raw_exit, _ = _find_zscore_exit_payload(portfolio_metadata, config.get("zscore_exit_context"))
+        control = raw_exit.get("position_control") if isinstance(raw_exit, Mapping) else None
+        if not isinstance(control, Mapping):
+            control = {}
+        raw_exposures = []
+        for source in (control, raw_exit):
+            if not isinstance(source, Mapping):
+                continue
+            if "target_btc_exposure" in source:
+                raw_exposures.append(source["target_btc_exposure"])
+            for name in ("target_allocations", "target_exposure"):
+                allocations = source.get(name)
+                if name in source and not isinstance(allocations, Mapping):
+                    raise ValueError("invalid BTC z-score target exposure")
+                if isinstance(allocations, Mapping) and "BTCUSDT" in allocations:
+                    raw_exposures.append(allocations["BTCUSDT"])
+        validated_exposures = []
+        for value in raw_exposures:
+            if is_bool(value):
+                raise ValueError("invalid BTC z-score target exposure")
+            try:
+                exposure = float(value)
+            except (TypeError, ValueError):
+                raise ValueError("invalid BTC z-score target exposure") from None
+            if not math.isfinite(exposure) or not 0 <= exposure <= 1:
+                raise ValueError("invalid BTC z-score target exposure")
+            validated_exposures.append(exposure)
+        if validated_exposures and any(value != validated_exposures[0] for value in validated_exposures[1:]):
+            raise ValueError("conflicting BTC z-score target exposure")
+        max_exit_exposure = {"risk_off": config["zscore_exit_risk_off_exposure"],
+                             "risk_reduced": config["zscore_exit_risk_reduced_exposure"]}.get(zscore.get("route"))
+        if max_exit_exposure is not None and zscore.get("target_btc_exposure", 1.0) > max_exit_exposure:
+            raise ValueError("BTC z-score target contradicts risk route")
+    btc_value = metadata.get("btc_value")
+    target_values = metadata.get("target_values")
+    if not isinstance(btc_value, (int, float)) or not math.isfinite(btc_value) or btc_value < 0:
+        raise ValueError("BTC rebalance plan has invalid holdings")
+    if not isinstance(target_values, Mapping):
+        raise ValueError("BTC rebalance plan has invalid targets")
+    planned_target = target_values.get("BTCUSDT", btc_value)
+    if not isinstance(planned_target, (int, float)) or not math.isfinite(planned_target) or planned_target < 0:
+        raise ValueError("BTC rebalance plan has invalid target")
+    # The pre-existing dynamic BTC ratio caps new accumulation; never force a
+    # sale solely because an existing holding is already above that limit.
+    previous_ratio = float(result["btc_target_ratio"])
+    target_value = min(planned_target, max(btc_value, total_equity * min(previous_ratio, 0.50)))
+    if isinstance(zscore, Mapping) and zscore.get("applied") is True and zscore.get("route") in {
+        "risk_reduced", "risk_off"
+    }:
+        target_value = min(target_value, btc_value)
+    btc_target_ratio = target_value / total_equity
+    positions = [PositionTarget(symbol="BTCUSDT", target_weight=btc_target_ratio, role="core")]
     budget_intents = (
         BudgetIntent(
             name="btc_dca_pool",
             symbol="BTCUSDT",
-            amount=total_equity * btc_target_ratio,
+            amount=max(0.0, target_value - btc_value),
             purpose="btc_core_accumulation",
         ),
     )
@@ -405,7 +616,7 @@ def evaluate_crypto_btc_dca(ctx: StrategyContext) -> StrategyDecision:
     risk_flags: tuple[str, ...] = ()
     if btc_target_ratio <= 0.0:
         risk_flags += ("no_btc_allocation",)
-    if not metadata.get("actionable", True):
+    if not metadata.get("actionable", True) or target_value == btc_value:
         risk_flags += ("no_execute",)
 
     diagnostics = {
@@ -417,7 +628,9 @@ def evaluate_crypto_btc_dca(ctx: StrategyContext) -> StrategyDecision:
         "regime": metadata.get("regime", "ordinary_dca"),
         "multiplier": metadata.get("multiplier", 1.0),
         "smart_multiplier_enabled": metadata.get("smart_multiplier_enabled", True),
-        "planned_investment_usd": metadata.get("planned_investment_usd", 0.0),
+        "planned_investment_usd": max(0.0, target_value - btc_value),
+        "btc_value_usd": btc_value,
+        "target_btc_value_usd": target_value,
         "in_execution_window": metadata.get("in_execution_window", True),
         "zscore_exit": metadata.get("zscore_exit", {}),
         "ahr999": metadata.get("ahr999", float("nan")),

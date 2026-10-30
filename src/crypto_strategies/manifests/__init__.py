@@ -43,6 +43,7 @@ crypto_btc_dca_manifest = StrategyManifest(
         {
             "market_prices",
             "portfolio_snapshot",
+            "derived_indicators",
         }
     ),
     default_config={
