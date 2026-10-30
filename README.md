@@ -77,7 +77,7 @@ Defaults are 16,000 input tokens and 2,500 output tokens per request, a 60-secon
 timeout, zero retries, and a $1 UTC-month budget reserved in issue comments before
 calls. Missing existing API secrets skips the API job; missing evidence, exhausted
 budget, or API failure produces `review unavailable`. See the
-[upstream runbook](https://github.com/QuantStrategyLab/CryptoLivePoolPipelines/blob/main/docs/operator_runbook.md#monthly-review-only-api-audit)
+[upstream runbook](https://github.com/QuantStrategyLab/CryptoLivePoolPipelines/blob/main/docs/operator-runbook.md#monthly-review-only-api-audit)
 for caps, budget accounting, and the human review path. This flow never runs
 Codex/Cursor CLI, edits repositories, or changes trading/live configuration.
 A green publisher or an open issue proves material preparation; completed review
