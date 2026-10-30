@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import unittest
 
+import numpy as np
 import pandas as pd
 
 from crypto_strategies.strategies.crypto_trend_rotation import (
@@ -13,6 +14,14 @@ from crypto_strategies.strategies.crypto_trend_rotation import (
     compute_signals,
     extract_managed_symbols,
 )
+
+
+def _benchmark_row():
+    return {"symbol": "BTCUSDT", "close": 60000.0, "sma20": 58000.0,
+            "sma60": 55000.0, "sma200": 50000.0, "roc20": 0.01,
+            "roc60": 0.02, "roc120": 0.03, "vol20": 0.4,
+            "avg_quote_vol_30": 1e9, "avg_quote_vol_90": 1e9,
+            "avg_quote_vol_180": 1e9, "trend_persist_90": 0.8, "age_days": 1000}
 
 
 class CryptoTrendRotationModuleTest(unittest.TestCase):
@@ -80,14 +89,13 @@ class CryptoTrendRotationModuleTest(unittest.TestCase):
             ]
         )
 
+        feature_snapshot = pd.concat([feature_snapshot, pd.DataFrame([_benchmark_row()])], ignore_index=True)
         weights, signal_desc, is_emergency, debug_str, metadata = compute_signals(
             feature_snapshot=feature_snapshot,
             current_holdings=[],
         )
 
-        # After enhancement: _extract_btc_snapshot provides default BTC benchmark
-        # data (regime_on=True) when no BTCUSDT row is present, so rotation now
-        # finds valid candidates from the test data. Both altcoins have:
+        # The verified BTC benchmark is present. Both altcoins have:
         #   price > sma20, price > sma60, price > sma200,
         #   positive rel_20/60/120, positive abs_momentum => valid candidates.
         self.assertIsNotNone(weights)
@@ -118,6 +126,7 @@ class CryptoTrendRotationModuleTest(unittest.TestCase):
             }
             for symbol, close in (("SOLUSDT", 180.0), ("ETHUSDT", 3000.0))
         ])
+        feature_snapshot = pd.concat([feature_snapshot, pd.DataFrame([_benchmark_row()])], ignore_index=True)
         weights, _, _, _, metadata = compute_signals(
             feature_snapshot,
             [],
@@ -134,6 +143,73 @@ class CryptoTrendRotationModuleTest(unittest.TestCase):
             payload["volatility_scaling_status"] == "proxy_scaled"
             for payload in metadata["selected_candidates"].values()
         ))
+
+    def test_invalid_btc_benchmark_rejects_without_target_weights(self) -> None:
+        from crypto_strategies.strategies.crypto_trend_rotation import build_target_weights
+
+        valid = _benchmark_row()
+        for field, value in (("close", 0), ("sma200", -1), ("close", float("nan")),
+                             ("sma200", float("inf")), ("roc20", float("nan")),
+                             ("roc60", float("inf")), ("roc120", None),
+                             ("regime_on", "invalid"), ("regime_on", None),
+                             ("regime_on", float("nan")), ("close", True),
+                             ("sma200", np.bool_(True)), ("roc20", True)):
+            row = {**valid, field: value}
+            with self.subTest(field=field, value=value), self.assertRaises(ValueError):
+                build_target_weights({"BTCUSDT": row}, [], {}, {}, {})
+        with self.assertRaises(ValueError):
+            build_target_weights({}, [], {}, {}, {})
+        with self.assertRaises(ValueError):
+            compute_signals(pd.DataFrame([{**valid, "symbol": "SOLUSDT"}]), [])
+        for field in ("close", "sma200", "roc20", "roc60", "roc120"):
+            with self.subTest(dataframe_field=field), self.assertRaises(ValueError):
+                compute_signals(pd.DataFrame([{**valid, field: True}, {**valid, "symbol": "SOLUSDT"}]), [])
+        for missing_regime in (None, float("nan")):
+            with self.subTest(dataframe_regime=missing_regime), self.assertRaises(ValueError):
+                compute_signals(pd.DataFrame([{**valid, "regime_on": missing_regime}]), [])
+
+    def test_valid_btc_fields_and_explicit_regime_drive_circuit_breaker(self) -> None:
+        from crypto_strategies.strategies.crypto_trend_rotation import (
+            _check_circuit_breaker, _extract_btc_snapshot,
+        )
+
+        row = _benchmark_row()
+        extracted = _extract_btc_snapshot({"BTCUSDT": row})
+        self.assertEqual(extracted["close"], row["close"])
+        self.assertEqual(extracted["sma200"], row["sma200"])
+        self.assertEqual(extracted["btc_roc20"], row["roc20"])
+        self.assertEqual(_check_circuit_breaker(extracted), (False, ""))
+        forced = _extract_btc_snapshot({"BTCUSDT": {**row, "close": 30000.0, "regime_on": True}})
+        self.assertEqual(_check_circuit_breaker(forced), (True, "btc_drawdown_40%_exceeds_30%"))
+        off = _extract_btc_snapshot({"BTCUSDT": {**row, "regime_on": False}})
+        self.assertEqual(_check_circuit_breaker(off), (True, "btc_below_sma200"))
+        for value, expected in ((np.bool_(True), True), (np.bool_(False), False),
+                                (np.int64(1), True), (np.int64(0), False),
+                                (1.0, True), (0.0, False), ("yes", True), ("off", False)):
+            with self.subTest(regime=value):
+                result = _extract_btc_snapshot({"BTCUSDT": {**row, "regime_on": value}})
+                self.assertIs(result["regime_on"], expected)
+
+    def test_authoritative_pool_excludes_btc_and_outside_features_but_keeps_held_visible(self) -> None:
+        btc = _benchmark_row()
+        alt = {**btc, "symbol": "ETHUSDT", "close": 3000.0, "sma20": 2800.0,
+               "sma60": 2600.0, "sma200": 2200.0, "roc20": 0.3, "roc60": 0.4, "roc120": 0.6}
+        extra = {**alt, "symbol": "SOLUSDT", "roc20": 0.8, "roc60": 0.9, "roc120": 1.0}
+        frame = pd.DataFrame([btc, alt, extra])
+        weights, _, _, _, metadata = compute_signals(
+            frame, ["OLDUSDT", "BTCUSDT"], universe_snapshot=["ETHUSDT", "BTC-USD", "BTCUSDT.P"]
+        )
+        self.assertEqual(set(weights), {"ETHUSDT"})
+        self.assertEqual(set(metadata["managed_symbols"]), {"ETHUSDT", "OLDUSDT"})
+        from crypto_strategies.strategies.crypto_trend_rotation import build_target_weights
+        self.assertEqual(build_target_weights({"BTCUSDT": btc}, ["BTCUSDT"], {},
+                         {"rotation_pool_symbols": ["BTCUSDT"]}, {}), {})
+        for invalid in ([], ["BTCUSDT"], ["UNKNOWNUSDT"], "ETHUSDT", [None]):
+            with self.subTest(universe=invalid), self.assertRaises(ValueError):
+                compute_signals(frame, [], universe_snapshot=invalid)
+        # Research callers can still omit the explicit pool; BTC stays a benchmark.
+        _, _, _, _, research = compute_signals(frame, [])
+        self.assertNotIn("BTCUSDT", research["managed_symbols"])
 
     def test_scaling_caps_gross_exposure_for_large_weights_and_unknown_volatility(self) -> None:
         from crypto_strategies.strategies.crypto_trend_rotation import _apply_volatility_scaling
@@ -198,6 +274,10 @@ class CryptoTrendRotationModuleTest(unittest.TestCase):
         self.assertIn("ETHUSDT", symbols)
         # BNBUSDT is not in the data
         self.assertNotIn("BNBUSDT", symbols)
+        with_benchmark = pd.concat([feature_snapshot, pd.DataFrame([
+            {"symbol": symbol} for symbol in ("BTC", "BTC-USD", "BTCUSDT", "BTCUSDT.P")
+        ])], ignore_index=True)
+        self.assertEqual(extract_managed_symbols(with_benchmark), symbols)
 
     def test_extract_managed_symbols_empty(self) -> None:
         """An empty snapshot should return an empty tuple."""

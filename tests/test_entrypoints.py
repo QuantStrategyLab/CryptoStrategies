@@ -85,6 +85,45 @@ def _fresh_as_of() -> datetime:
 
 
 class CryptoStrategyEntrypointTests(unittest.TestCase):
+    def test_trend_entrypoint_uses_authoritative_pool_and_keeps_held_positions_visible(self) -> None:
+        entrypoint = get_strategy_entrypoint("crypto_trend_rotation")
+        def row(close, roc):
+            return {"close": close, "sma20": close * .95, "sma60": close * .90,
+                    "sma200": close * .80, "roc20": roc, "roc60": roc,
+                    "roc120": roc, "vol20": 2.0, "avg_quote_vol_30": 1e9,
+                    "avg_quote_vol_90": 1e9, "avg_quote_vol_180": 1e9,
+                    "trend_persist_90": .8, "age_days": 500}
+        portfolio = PortfolioSnapshot(
+            as_of=_fresh_as_of(), total_equity=1000.0, buying_power=900.0, cash_balance=900.0,
+            positions=(Position(symbol="OLDUSDT", quantity=1.0, market_value=100.0),),
+            metadata={"observed_effective_exposure": 0.1},
+        )
+        market_data = {
+            "market_prices": {"BTCUSDT": 60000.0, "ETHUSDT": 3000.0,
+                              "SOLUSDT": 180.0, "OLDUSDT": 100.0},
+            "derived_indicators": {"BTCUSDT": row(60000.0, .01),
+                                   "ETHUSDT": row(3000.0, .3),
+                                   "SOLUSDT": row(180.0, .8)},
+            "benchmark_snapshot": {"regime_on": True}, "portfolio_snapshot": portfolio,
+            "universe_snapshot": ("ETHUSDT", "BTCUSDT"),
+        }
+        artifacts = _synthetic_risk_artifacts("crypto_trend_rotation", "ETHUSDT", "OLDUSDT")
+        def context(data):
+            return StrategyContext(as_of=_fresh_as_of(), market_data=data, state={}, artifacts=artifacts)
+        with patch("crypto_strategies.entrypoints.record_strategy_decision"):
+            decision = _evaluate_once(entrypoint, context(market_data))
+        self.assertEqual(decision.diagnostics["member_risk_assessment"]["outcome"], "APPROVE")
+        self.assertEqual({item.symbol for item in decision.positions}, {"ETHUSDT"})
+        self.assertEqual(set(decision.diagnostics["managed_symbols"]), {"ETHUSDT", "OLDUSDT"})
+        for missing_universe in (None, (), ("BTCUSDT",), ("MISSINGUSDT",)):
+            bad = dict(market_data)
+            if missing_universe is None:
+                bad.pop("universe_snapshot")
+            else:
+                bad["universe_snapshot"] = missing_universe
+            with self.subTest(universe=missing_universe), self.assertRaises(ValueError):
+                entrypoint.evaluate(context(bad))
+
     def test_crypto_live_pool_rotation_entrypoint_resolves_pool_from_upstream_artifact(self) -> None:
         entrypoint = get_strategy_entrypoint("crypto_live_pool_rotation")
         upstream_pool = ["SOLUSDT", "ETHUSDT"]

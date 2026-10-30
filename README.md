@@ -53,6 +53,29 @@ Research-only profiles may stay in code for reproducibility and future review, b
 | `crypto_trend_rotation` | Crypto Trend Rotation | Research-only redesign candidate. |
 | `crypto_equity_combo` | Crypto Equity Combo | Research-only orchestrator candidate. |
 
+The separate `full_cycle_no_submit` allowlist includes `crypto_btc_dca` and
+`crypto_trend_rotation` alongside `crypto_live_pool_rotation` for bounded
+validation. It grants no production or live selection. Platform validation must
+still enforce disabled execution, account isolation, required inputs and the
+broker submit block. The trend profile rejects missing or invalid BTC benchmark
+inputs without generating targets. For the combined research strategy, when a
+benchmark mapping is supplied, a missing BTC indicator can be caught at the
+trend leg while the BTC leg still produces a target. Without a benchmark mapping,
+missing BTC indicators can instead raise before the legs run. Neither case
+grants order authority or implies a universal no-order outcome.
+
+The standalone trend runtime requires the authoritative `universe_snapshot` and
+a complete BTC daily-indicator benchmark in `derived_indicators`. BTC benchmark
+aliases and symbols outside that pool cannot become rotation candidates. Managed
+visibility retains the pool and positive holdings supplied in the platform's
+portfolio snapshot, without creating a new exit rule or proving cross-strategy
+ownership. Direct research calls may omit the pool and infer non-BTC candidates
+from their feature rows. With no explicit regime, this standalone profile uses
+close above SMA200; it does not apply the live-pool slope rule. Held-position
+visibility comes from the supplied portfolio, not market-price keys. The historical daily
+indicator producer does not by itself establish closed-candle or point-in-time
+provenance; the platform validation path must establish those separately.
+
 ## How this connects to execution
 
 Execution platforms consume this package through strategy loaders and runtime metadata. Current downstream platforms: BinancePlatform.

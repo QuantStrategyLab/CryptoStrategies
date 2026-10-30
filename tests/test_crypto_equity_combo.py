@@ -125,6 +125,30 @@ class CryptoEquityComboModuleTest(unittest.TestCase):
         self.assertEqual(positive_weights, {"ETHUSDT"})
         self.assertEqual(set(metadata["trend_leg"]["weights"]), {"ETHUSDT"})
 
+    def test_missing_benchmark_preserves_combo_btc_leg_and_reports_trend_failure(self) -> None:
+        """A failed trend leg is not a no-order guarantee for the combined strategy."""
+        weights, metadata = build_target_weights(
+            prices={"BTCUSDT": 60000.0}, indicators_map={}, universe_snapshot=[],
+            benchmark_snapshot={"regime_on": True},
+            portfolio={"total_equity": 100000.0, "buying_power": 1000.0},
+            btc_weight=0.30, trend_weight=0.70, dynamic_mode=False,
+            smart_multiplier_enabled=False, as_of="2026-05-26",
+        )
+        self.assertGreater(weights["BTCUSDT"], 0.0)
+        self.assertEqual(metadata["trend_leg"]["weights"], {})
+        self.assertIn("BTC benchmark is required", metadata["trend_leg"]["error"])
+
+    def test_missing_benchmark_without_snapshot_rejects_before_combo_legs(self) -> None:
+        """A missing non-dict benchmark can reject before the trend-leg fallback."""
+        with self.assertRaisesRegex(ValueError, "BTC benchmark is required"):
+            build_target_weights(
+                prices={"BTCUSDT": 60000.0}, indicators_map={}, universe_snapshot=[],
+                benchmark_snapshot=None,
+                portfolio={"total_equity": 100000.0, "buying_power": 1000.0},
+                btc_weight=0.30, trend_weight=0.70, dynamic_mode=False,
+                smart_multiplier_enabled=False, as_of="2026-05-26",
+            )
+
     def test_dynamic_regime_off_cut_is_configurable(self) -> None:
         """Regime-off cut should be configurable while keeping the 50% default."""
         _, default_metadata = build_target_weights(
