@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -125,8 +126,13 @@ def test_run_walk_forward_uses_real_panel_and_writes_return_matrix(
         panel=panel,
         market_history=market_history,
         returns_output=returns_output,
+        attempt_record_dir=tmp_path / "attempts",
     )
 
+    record = _attempt_record(tmp_path / "attempts")
+    assert record["status"] == "completed"
+    assert record["data"]["status"] == "normalized_frames"
+    assert record["returns_sha256"] == hashlib.sha256(returns_output.read_bytes()).hexdigest()
     return_matrix = pd.read_csv(returns_output)
     assert payload["baseline"]["observation_count"] == 126
     assert {"as_of", "crypto_live_pool_rotation", "buy_hold_BTC"} <= set(return_matrix.columns)
@@ -257,3 +263,141 @@ def test_normalized_missing_unexposed_prices_preserve_runner_periods(cash_first:
     assert result.observation_count == 3
     assert runner.last_daily_returns.index.tolist() == dates[1:-1].tolist()
     assert runner.last_daily_returns.tolist() == [0.0, 0.0, 0.0]
+
+
+def _attempt_record(directory: Path) -> dict:
+    records = list(directory.glob("*.json"))
+    assert len(records) == 1
+    return json.loads(records[0].read_text(encoding="utf-8"))
+
+
+def test_attempt_record_tracks_success_and_legacy_opt_out(tmp_path: Path) -> None:
+    records = tmp_path / "private-records"
+    run_walk_forward(profile="crypto_live_pool_rotation", synthetic_days=2200,
+                     store_root=tmp_path / "without")
+    assert not records.exists()
+    result = run_walk_forward(profile="crypto_live_pool_rotation", synthetic_days=2200,
+                              store_root=tmp_path / "with", attempt_record_dir=records)
+    record = _attempt_record(records)
+    assert record["status"] == "completed"
+    assert record["baseline_status"] == "committed"
+    assert record["baseline_run_id"] == result["baseline"]["run_id"]
+    expected = json.dumps(result, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+    assert record["result_sha256"] == hashlib.sha256(expected).hexdigest()
+    assert record["result_digest_scope"] == "returned_summary_json_v1"
+    assert record["data"]["status"] == "unknown"
+    assert record["family_complete"] is False and record["cost_status"] == "unknown"
+    assert str(tmp_path) not in json.dumps(record)
+
+
+def test_attempt_records_fold_failure_without_baseline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from quant_platform_kit.strategy_lifecycle.backtest_orchestrator import BacktestOrchestrator
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("private-error-sentinel")
+
+    monkeypatch.setattr(BacktestOrchestrator, "walk_forward", fail)
+    with pytest.raises(RuntimeError):
+        run_walk_forward(profile="crypto_live_pool_rotation", synthetic_days=2200,
+                         store_root=tmp_path / "store", attempt_record_dir=tmp_path / "records")
+    record = _attempt_record(tmp_path / "records")
+    assert record["status"] == "failed" and record["failure_stage"] == "folds"
+    assert record["baseline_status"] == "not_attempted"
+    assert "private-error-sentinel" not in json.dumps(record)
+    assert not list((tmp_path / "store").rglob("backtest_*.json"))
+
+
+def test_attempt_records_output_failure_after_baseline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    panel = orchestrator_runner._synthetic_panel(days=2200)
+    history = orchestrator_runner._synthetic_market_history(days=2200)
+
+    def fail(*args, **kwargs):
+        raise OSError("private-path-sentinel")
+
+    monkeypatch.setattr(walk_forward, "_write_return_matrix", fail)
+    with pytest.raises(OSError):
+        run_walk_forward(profile="crypto_live_pool_rotation", panel=panel, market_history=history,
+                         store_root=tmp_path / "store", returns_output=tmp_path / "returns.csv",
+                         attempt_record_dir=tmp_path / "records")
+    record = _attempt_record(tmp_path / "records")
+    assert record["status"] == "failed" and record["failure_stage"] == "returns_output"
+    assert record["baseline_status"] == "committed" and record["returns_status"] == "unknown"
+    assert record["data"]["status"] == "normalized_frames"
+    assert len(record["data"]["panel_sha256"]) == 64
+    assert list((tmp_path / "store").rglob("backtest_*.json"))
+    assert "private-path-sentinel" not in json.dumps(record)
+
+
+def test_interruption_leaves_started_and_start_failure_stops_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from quant_platform_kit.strategy_lifecycle.backtest_orchestrator import BacktestOrchestrator
+
+    def interrupt(*args, **kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(BacktestOrchestrator, "walk_forward", interrupt)
+    with pytest.raises(KeyboardInterrupt):
+        run_walk_forward(profile="crypto_live_pool_rotation", synthetic_days=2200,
+                         store_root=tmp_path / "store", attempt_record_dir=tmp_path / "records")
+    assert _attempt_record(tmp_path / "records")["status"] == "started"
+    bad_directory = tmp_path / "not-a-directory"
+    bad_directory.write_text("x")
+    with pytest.raises(OSError):
+        run_walk_forward(profile="crypto_live_pool_rotation", synthetic_days=2200,
+                         store_root=tmp_path / "must-not-run", attempt_record_dir=bad_directory)
+    assert not (tmp_path / "must-not-run").exists()
+
+
+def test_cli_records_input_failure_and_post_baseline_json_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    input_records = tmp_path / "input-records"
+    monkeypatch.setattr(sys, "argv", ["walk-forward", "--attempt-record-dir", str(input_records),
+                                     "--panel", str(tmp_path / "missing-private.csv")])
+    with pytest.raises(OSError):
+        walk_forward.main()
+    record = _attempt_record(input_records)
+    assert record["failure_stage"] == "input" and record["baseline_status"] == "not_attempted"
+    assert str(tmp_path) not in json.dumps(record)
+
+    output_records = tmp_path / "output-records"
+    output_directory = tmp_path / "is-directory"
+    output_directory.mkdir()
+    monkeypatch.setattr(sys, "argv", ["walk-forward", "--attempt-record-dir", str(output_records),
+        "--synthetic-days", "2200", "--store-root", str(tmp_path / "store"),
+        "--json-output", str(output_directory)])
+    with pytest.raises(OSError):
+        walk_forward.main()
+    record = _attempt_record(output_records)
+    assert record["failure_stage"] == "json_output" and record["baseline_status"] == "committed"
+    assert record["json_output_status"] == "unknown"
+    assert list((tmp_path / "store").rglob("backtest_*.json"))
+
+
+def test_attempt_start_is_atomic_on_interruption_and_never_overwrites(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    directory = tmp_path / "records"
+
+    def interrupted_dump(value, stream, **kwargs):
+        stream.write('{"partial":')
+        raise KeyboardInterrupt
+
+    with monkeypatch.context() as scoped:
+        scoped.setattr(walk_forward.json, "dump", interrupted_dump)
+        with pytest.raises(KeyboardInterrupt):
+            run_walk_forward(profile="crypto_live_pool_rotation", synthetic_days=2200,
+                             store_root=tmp_path / "never-run", attempt_record_dir=directory)
+    assert not list(directory.glob("*.json"))
+    assert not (tmp_path / "never-run").exists()
+
+    class FixedId:
+        hex = "a" * 32
+
+    existing = directory / (FixedId.hex + ".json")
+    existing.write_text('{"existing":true}', encoding="utf-8")
+    monkeypatch.setattr(walk_forward.uuid, "uuid4", lambda: FixedId())
+    with pytest.raises(FileExistsError):
+        run_walk_forward(profile="crypto_live_pool_rotation", synthetic_days=2200,
+                         store_root=tmp_path / "never-run", attempt_record_dir=directory)
+    assert json.loads(existing.read_text(encoding="utf-8")) == {"existing": True}
+    assert not (tmp_path / "never-run").exists()
