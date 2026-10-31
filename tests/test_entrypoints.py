@@ -333,6 +333,40 @@ class CryptoStrategyEntrypointTests(unittest.TestCase):
             with self.subTest(universe=missing_universe), self.assertRaises(ValueError):
                 entrypoint.evaluate(context(bad))
 
+    def test_trend_entrypoint_forwards_volatility_sizing_config(self) -> None:
+        entrypoint = get_strategy_entrypoint("crypto_trend_rotation")
+
+        def row(close, roc):
+            return {"close": close, "sma20": close * .95, "sma60": close * .90,
+                    "sma200": close * .80, "roc20": roc, "roc60": roc,
+                    "roc120": roc, "vol20": 2.0, "avg_quote_vol_30": 1e9,
+                    "avg_quote_vol_90": 1e9, "avg_quote_vol_180": 1e9,
+                    "trend_persist_90": .8, "age_days": 500}
+
+        now = _fresh_as_of()
+        portfolio = PortfolioSnapshot(as_of=now, total_equity=1000.0, buying_power=1000.0,
+                                      cash_balance=1000.0, metadata={"observed_effective_exposure": 0.0})
+        market = {"market_prices": {"BTCUSDT": 60000.0, "ETHUSDT": 3000.0},
+                  "derived_indicators": {"BTCUSDT": row(60000.0, .01), "ETHUSDT": row(3000.0, .3)},
+                  "portfolio_snapshot": portfolio, "universe_snapshot": ("ETHUSDT",)}
+        artifacts = _synthetic_risk_artifacts("crypto_trend_rotation", "ETHUSDT")
+
+        def evaluate(config):
+            ctx = StrategyContext(as_of=now, market_data=market, state={}, runtime_config=config, artifacts=artifacts)
+            return _evaluate_once(entrypoint, ctx)
+
+        with patch("crypto_strategies.entrypoints.record_strategy_decision"), \
+             patch.object(qpk_risk_gate, "_utc_now", return_value=now):
+            for config, expected in (({}, .20), ({"target_vol": .20}, .10), ({"max_leverage": .05}, .05)):
+                with self.subTest(config=config):
+                    decision = evaluate(config)
+                    self.assertEqual(decision.diagnostics["member_risk_assessment"]["outcome"], "APPROVE")
+                    self.assertEqual(len(decision.positions), 1)
+                    self.assertAlmostEqual(decision.positions[0].target_weight, expected)
+            for config in ({"target_vol": -1}, {"max_leverage": -1}):
+                with self.subTest(config=config), self.assertRaises(ValueError):
+                    evaluate(config)
+
     def test_crypto_live_pool_rotation_entrypoint_resolves_pool_from_upstream_artifact(self) -> None:
         entrypoint = get_strategy_entrypoint("crypto_live_pool_rotation")
         upstream_pool = ["SOLUSDT", "ETHUSDT"]

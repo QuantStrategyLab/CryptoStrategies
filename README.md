@@ -90,6 +90,11 @@ close above SMA200; it does not apply the live-pool slope rule. Held-position
 visibility comes from the supplied portfolio, not market-price keys. The historical daily
 indicator producer does not by itself establish closed-candle or point-in-time
 provenance; the platform validation path must establish those separately.
+The standalone trend entrypoint passes its effective `target_vol` and
+`max_leverage` configuration to the existing volatility sizing calculation.
+Their defaults remain `0.40` and `1.0`, respectively. The calculation compares
+the target with its weighted single-asset `vol20` proxy and caps gross exposure;
+it does not establish covariance portfolio volatility or grant execution authority.
 
 ## How this connects to execution
 
