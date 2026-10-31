@@ -67,6 +67,8 @@ Organization documentation rules are checked by `python scripts/check_style.py`,
 
 ## Do not
 
+- Only the owner, or a reviewer explicitly authorized by the owner, may apply the `owner-approved` label; coding agents must never apply it to their own PRs.
+
 - Do not add broker credentials, deployment switches or order submission here.
 - Do not edit thesis-ledger entries or research evidence to satisfy a check.
 - Do not change a strategy's published metadata without updating the manifest and
