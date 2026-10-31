@@ -1,0 +1,5 @@
+# Installation-test constraints from the existing Binance Python 3.11 lock.
+# https://github.com/QuantStrategyLab/BinancePlatform/blob/20209604a9288482bed9e25506d3c9b6942ea2f1/uv.lock
+# This fixture does not update or replace the consumer's dependency lock.
+numpy==2.4.6
+pandas==3.0.3
