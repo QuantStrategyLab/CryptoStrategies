@@ -280,6 +280,7 @@ def test_attempt_record_tracks_success_and_legacy_opt_out(tmp_path: Path) -> Non
                               store_root=tmp_path / "with", attempt_record_dir=records)
     record = _attempt_record(records)
     assert record["status"] == "completed"
+    assert record["schema_version"] == "crypto.walk_forward_attempt.v2"
     assert record["baseline_status"] == "committed"
     assert record["baseline_run_id"] == result["baseline"]["run_id"]
     expected = json.dumps(result, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
@@ -401,3 +402,40 @@ def test_attempt_start_is_atomic_on_interruption_and_never_overwrites(
                          store_root=tmp_path / "never-run", attempt_record_dir=directory)
     assert json.loads(existing.read_text(encoding="utf-8")) == {"existing": True}
     assert not (tmp_path / "never-run").exists()
+
+
+def test_requested_outputs_are_not_attempted_on_input_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    records = tmp_path / "records"
+    monkeypatch.setattr(sys, "argv", ["walk-forward", "--attempt-record-dir", str(records),
+        "--panel", str(tmp_path / "missing.csv"), "--returns-output", str(tmp_path / "returns.csv"),
+        "--json-output", str(tmp_path / "summary.json")])
+    with pytest.raises(OSError):
+        walk_forward.main()
+    record = _attempt_record(records)
+    assert record["failure_stage"] == "input"
+    assert record["schema_version"] == "crypto.walk_forward_attempt.v2"
+    assert record["returns_status"] == "not_attempted"
+    assert record["json_output_status"] == "not_attempted"
+    assert str(tmp_path) not in json.dumps(record)
+
+
+def test_requested_returns_are_not_attempted_on_fold_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from quant_platform_kit.strategy_lifecycle.backtest_orchestrator import BacktestOrchestrator
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("fold failure")
+
+    monkeypatch.setattr(BacktestOrchestrator, "walk_forward", fail)
+    with pytest.raises(RuntimeError):
+        run_walk_forward(profile="crypto_live_pool_rotation", store_root=tmp_path / "store",
+                         returns_output=tmp_path / "returns.csv", attempt_record_dir=tmp_path / "records")
+    record = _attempt_record(tmp_path / "records")
+    assert record["failure_stage"] == "folds"
+    assert record["schema_version"] == "crypto.walk_forward_attempt.v2"
+    assert record["returns_status"] == "not_attempted"
+    assert record["json_output_status"] == "not_requested"
+    assert str(tmp_path) not in json.dumps(record)
