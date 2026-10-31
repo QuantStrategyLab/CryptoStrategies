@@ -241,12 +241,13 @@ def _frame_sha256(frame: pd.DataFrame) -> str:
 
 
 class _Attempt:
-    def __init__(self, directory: Path, *, profile: str, windows, synthetic_days: int):
+    def __init__(self, directory: Path, *, profile: str, windows, synthetic_days: int,
+                 returns_requested: bool = False, json_output_requested: bool = False):
         directory = Path(directory)
         directory.mkdir(parents=True, exist_ok=True)
         self.path = directory / (uuid.uuid4().hex + ".json")
         self.data = {
-            "schema_version": "crypto.walk_forward_attempt.v1",
+            "schema_version": "crypto.walk_forward_attempt.v2",
             "attempt_id": self.path.stem, "status": "started",
             "started_at": datetime.now(timezone.utc).isoformat(),
             "profile": profile if profile in SUPPORTED_PROFILES else "unsupported",
@@ -256,9 +257,10 @@ class _Attempt:
             "cost_status": "unknown", "data": {"status": "unknown"},
             "source": {"entrypoint_sha256": _content_sha256(Path(__file__)),
                        "dependencies": "unknown", "authenticity": "unverified"},
-            "baseline_status": "not_attempted", "returns_status": "not_requested",
+            "baseline_status": "not_attempted",
+            "returns_status": "not_attempted" if returns_requested else "not_requested",
             "stage": "input",
-            "json_output_status": "not_requested",
+            "json_output_status": "not_attempted" if json_output_requested else "not_requested",
         }
         # A same-directory hard link publishes the fully written record without
         # replacing an existing ID. A failed publication never starts the run.
@@ -433,7 +435,7 @@ def run_walk_forward(*, profile: str, windows=DEFAULT_WINDOWS, synthetic_days: i
                      _attempt: _Attempt | None = None) -> dict[str, Any]:
     owned = _attempt is None and attempt_record_dir is not None
     attempt = _attempt or (_Attempt(attempt_record_dir, profile=profile, windows=windows,
-                                    synthetic_days=synthetic_days) if owned else None)
+                                    synthetic_days=synthetic_days, returns_requested=returns_output is not None) if owned else None)
     try:
         result = _run_walk_forward(profile=profile, windows=windows, synthetic_days=synthetic_days,
             store_root=store_root, panel=panel, market_history=market_history,
@@ -471,7 +473,8 @@ def main() -> int:
         return 0
 
     attempt = (_Attempt(args.attempt_record_dir, profile=args.profile, windows=DEFAULT_WINDOWS,
-                        synthetic_days=args.synthetic_days) if args.attempt_record_dir else None)
+                        synthetic_days=args.synthetic_days, returns_requested=args.returns_output is not None,
+                        json_output_requested=bool(args.json_output)) if args.attempt_record_dir else None)
     stage = "input"
     try:
         panel = pd.read_csv(args.panel, compression="infer") if args.panel else None

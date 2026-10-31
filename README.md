@@ -149,7 +149,16 @@ keep records out of Git. Recording begins after argument parsing and before inpu
 reads. Initial and subsequent records are published atomically; a failure or
 interruption can leave a started record. Baseline persistence, output files and
 attempt records are separate writes, not a transaction. Their states are recorded
-separately; an unknown state requires investigation.
+separately; an unknown state requires investigation. New records use
+`crypto.walk_forward_attempt.v2`, which adds `not_attempted` to both output
+status fields. A requested output starts as `not_attempted`, changes to `unknown`
+before writing and to `written` when the write call returns. `written` does not
+guarantee a digest or durable storage. `not_requested` means no output was
+requested. Existing v1 records are not rewritten; their `not_requested` can
+include a request that failed before writing. Consumers of v1 must explicitly
+coordinate and upgrade to handle v2; do not silently relax their validation.
+The [output-state decision](docs/adr/0001-version-research-attempt-output-states.md)
+describes the version boundary.
 
 Records include parameters, windows, available normalized input and output
 digests, and an entrypoint file digest. The returned summary has a canonical
