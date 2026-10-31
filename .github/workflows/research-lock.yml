@@ -32,6 +32,7 @@ jobs:
       - name: Record the resolved lock and dependency delta
         run: |
           python - <<'PY'
+          import base64
           import hashlib
           import json
           import os
@@ -87,6 +88,15 @@ jobs:
           (output / "uv.lock").write_bytes(candidate_bytes)
           (output / "resolution-receipt.json").write_text(json.dumps(receipt, indent=2) + "\n")
           print(json.dumps(receipt, indent=2))
+          encoded = base64.b64encode(candidate_bytes).decode("ascii")
+          chunks = [encoded[index:index + 4096] for index in range(0, len(encoded), 4096)]
+          print("UV_LOCK_BASE64_BEGIN")
+          print(f"UV_LOCK_BYTE_LENGTH={len(candidate_bytes)}")
+          print(f"UV_LOCK_SHA256={receipt['candidate_lock_sha256']}")
+          print(f"UV_LOCK_BASE64_CHUNKS={len(chunks)}")
+          for index, chunk in enumerate(chunks):
+              print(f"UV_LOCK_BASE64_{index:04d}={chunk}")
+          print("UV_LOCK_BASE64_END")
 
           assert set(identity_changes) == {"pandas"}, identity_changes
           assert {package["version"] for package in after["pandas"]} == {"3.1.0"}
