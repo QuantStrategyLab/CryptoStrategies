@@ -17,7 +17,6 @@ jobs:
         python-version: ["3.11", "3.12"]
     env:
       UV_PYTHON: ${{ matrix.python-version }}
-      UV_PROJECT_ENVIRONMENT: ${{ runner.temp }}/crypto-research-environment
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -36,11 +35,15 @@ jobs:
           git diff --exit-code -- uv.lock
 
       - name: Install the frozen research environment
+        env:
+          UV_PROJECT_ENVIRONMENT: ${{ runner.temp }}/crypto-research-environment
         run: |
           uv sync --frozen --extra research --no-editable
           uv pip check --python "${UV_PROJECT_ENVIRONMENT}/bin/python"
 
       - name: Verify installed versions, origins and public import
+        env:
+          UV_PROJECT_ENVIRONMENT: ${{ runner.temp }}/crypto-research-environment
         run: |
           cd "${RUNNER_TEMP}"
           "${UV_PROJECT_ENVIRONMENT}/bin/python" -I - "${GITHUB_WORKSPACE}" <<'PY'
