@@ -113,6 +113,7 @@ python -m pytest -q
 
 ## 延伸文档
 
+- [运行时监控依赖提案](docs/adr/0002-declare-runtime-monitoring-dependencies.md)
 - [`docs/crypto-cross-platform-strategy-spec.md`](docs/crypto-cross-platform-strategy-spec.md)
 - [`docs/crypto-cross-platform-strategy-spec.zh-CN.md`](docs/crypto-cross-platform-strategy-spec.zh-CN.md)
 - [`docs/crypto-portability-checklist.md`](docs/crypto-portability-checklist.md)
