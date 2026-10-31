@@ -1,3 +1,7 @@
 # Strategy decisions and execution entrypoints require owner visibility.
 /src/crypto_strategies/entrypoints/ @Pigbibi
 /src/crypto_strategies/strategies/ @Pigbibi
+
+# Risk-sensitive changes require the repository owner.
+/.github/CODEOWNERS @Pigbibi
+/.github/workflows/ @Pigbibi
