@@ -140,6 +140,25 @@ python -m pip install -e .
 python -m pytest -q
 ```
 
+## Research attempt records
+
+Pass `--attempt-record-dir <protected-directory>` to
+`scripts/run_walk_forward_backtest.py` to record an individual attempt; leave it
+unset to retain the existing flow. The caller must choose protected storage and
+keep records out of Git. Recording begins after argument parsing and before input
+reads. Initial and subsequent records are published atomically; a failure or
+interruption can leave a started record. Baseline persistence, output files and
+attempt records are separate writes, not a transaction. Their states are recorded
+separately; an unknown state requires investigation.
+
+Records include parameters, windows, available normalized input and output
+digests, and an entrypoint file digest. The returned summary has a canonical
+JSON digest even when no output file is requested; it is not a complete net
+return matrix or proof of a file on disk. Digests do not authenticate sources or
+cover all code and dependencies. Unavailable inputs and costs remain unknown.
+Every record sets `family_complete=false`; it neither reconstructs historical
+trials nor grants research, DSR/PBO or trading approval.
+
 ## Useful docs
 
 - [`docs/crypto-cross-platform-strategy-spec.md`](docs/crypto-cross-platform-strategy-spec.md)
