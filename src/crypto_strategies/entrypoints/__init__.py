@@ -706,6 +706,8 @@ def evaluate_crypto_trend_rotation(ctx: StrategyContext) -> StrategyDecision:
         circuit_breaker_enabled=bool(config.get("circuit_breaker_enabled", True)),
         btc_drawdown_threshold=float(config.get("btc_drawdown_threshold", 0.30)),
         vol_scaling_enabled=bool(config.get("vol_scaling_enabled", True)),
+        target_vol=float(config.get("target_vol", 0.40)),
+        max_leverage=float(config.get("max_leverage", 1.0)),
     )
 
     positions: list[PositionTarget] = []
