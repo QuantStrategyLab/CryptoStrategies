@@ -170,6 +170,7 @@ trials nor grants research, DSR/PBO or trading approval.
 
 ## Useful docs
 
+- [Runtime monitoring dependency proposal](docs/adr/0002-declare-runtime-monitoring-dependencies.md)
 - [`docs/crypto-cross-platform-strategy-spec.md`](docs/crypto-cross-platform-strategy-spec.md)
 - [`docs/crypto-cross-platform-strategy-spec.zh-CN.md`](docs/crypto-cross-platform-strategy-spec.zh-CN.md)
 - [`docs/crypto-portability-checklist.md`](docs/crypto-portability-checklist.md)
