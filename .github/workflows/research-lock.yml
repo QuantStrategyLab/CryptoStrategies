@@ -1,0 +1,108 @@
+name: Research lock
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  generate:
+    name: Generate research lock candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install the lock resolver
+        run: python -m pip install uv==0.13.4
+
+      - name: Preserve the input lock
+        run: cp uv.lock "${RUNNER_TEMP}/crypto-research-lock-baseline.lock"
+
+      - name: Resolve the approved Pandas version
+        run: uv lock --upgrade-package pandas==3.1.0
+
+      - name: Record the resolved lock and dependency delta
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import subprocess
+          import tomllib
+
+          baseline_bytes = (Path(os.environ["RUNNER_TEMP"]) / "crypto-research-lock-baseline.lock").read_bytes()
+          candidate_bytes = Path("uv.lock").read_bytes()
+          baseline = tomllib.loads(baseline_bytes.decode())
+          candidate = tomllib.loads(candidate_bytes.decode())
+          project = tomllib.loads(Path("pyproject.toml").read_text())["project"]
+
+          def records(document):
+              result = {}
+              for package in document["package"]:
+                  result.setdefault(package["name"], []).append(package)
+              return result
+
+          def identities(packages):
+              return sorted(
+                  (package["version"], json.dumps(package["source"], sort_keys=True))
+                  for package in packages
+              )
+
+          before = records(baseline)
+          after = records(candidate)
+          names = sorted(set(before) | set(after))
+          identity_changes = {
+              name: {"before": identities(before.get(name, [])), "after": identities(after.get(name, []))}
+              for name in names if identities(before.get(name, [])) != identities(after.get(name, []))
+          }
+          root_package = after[project["name"]][0]
+          research_requirements = [
+              item for item in root_package["metadata"]["requires-dist"]
+              if item.get("marker") == "extra == 'research'"
+          ]
+          receipt = {
+              "source_commit": os.environ["GITHUB_SHA"],
+              "uv_version": subprocess.check_output(["uv", "--version"], text=True).strip(),
+              "baseline_lock_sha256": hashlib.sha256(baseline_bytes).hexdigest(),
+              "candidate_lock_sha256": hashlib.sha256(candidate_bytes).hexdigest(),
+              "package_identity_changes": identity_changes,
+              "changed_package_records": [name for name in names if before.get(name) != after.get(name)],
+              "declared_research_requirements": project["optional-dependencies"]["research"],
+              "locked_research_requirements": research_requirements,
+              "qpk_source_unchanged": before["quant-platform-kit"] == after["quant-platform-kit"],
+              "candidate_generated": True,
+              "adoption_authorized_by_this_job": False,
+          }
+          output = Path(os.environ["RUNNER_TEMP"]) / "crypto-research-lock"
+          output.mkdir()
+          (output / "uv.lock").write_bytes(candidate_bytes)
+          (output / "resolution-receipt.json").write_text(json.dumps(receipt, indent=2) + "\n")
+          print(json.dumps(receipt, indent=2))
+
+          assert set(identity_changes) == {"pandas"}, identity_changes
+          assert {package["version"] for package in after["pandas"]} == {"3.1.0"}
+          assert receipt["qpk_source_unchanged"]
+          assert {item["name"]: item["specifier"] for item in research_requirements} == {
+              "numpy": ">=2.4.6", "pandas": ">=3.1.0",
+          }
+          PY
+
+      - name: Preserve the generated lock for review
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: crypto-research-lock-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/crypto-research-lock/uv.lock
+            ${{ runner.temp }}/crypto-research-lock/resolution-receipt.json
+          if-no-files-found: error
+          retention-days: 7
