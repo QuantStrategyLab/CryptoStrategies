@@ -7,9 +7,11 @@ import argparse
 import copy
 import hashlib
 import json
+import os
 import tempfile
+import uuid
 from dataclasses import replace
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -218,7 +220,85 @@ def _baseline_from_return_tail(full_result: Any, returns: pd.Series) -> Any:
     )
 
 
-def run_walk_forward(
+
+def _content_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _frame_sha256(frame: pd.DataFrame) -> str:
+    # Includes columns, dtypes, index and data; this is not source authentication.
+    digest = hashlib.sha256()
+    digest.update(json.dumps({"columns": list(map(str, frame.columns)),
+                              "dtypes": list(map(str, frame.dtypes)),
+                              "index_names": list(map(str, frame.index.names))},
+                             sort_keys=True).encode())
+    digest.update(pd.util.hash_pandas_object(frame, index=True).values.tobytes())
+    return digest.hexdigest()
+
+
+class _Attempt:
+    def __init__(self, directory: Path, *, profile: str, windows, synthetic_days: int):
+        directory = Path(directory)
+        directory.mkdir(parents=True, exist_ok=True)
+        self.path = directory / (uuid.uuid4().hex + ".json")
+        self.data = {
+            "schema_version": "crypto.walk_forward_attempt.v1",
+            "attempt_id": self.path.stem, "status": "started",
+            "started_at": datetime.now(timezone.utc).isoformat(),
+            "profile": profile if profile in SUPPORTED_PROFILES else "unsupported",
+            "params": dict(PROFILE_DEFAULTS.get(profile, {"min_history_days": DEFAULT_MIN_HISTORY_DAYS})),
+            "windows": [[start.isoformat(), end.isoformat()] for start, end in windows],
+            "synthetic_days": synthetic_days, "family_complete": False,
+            "cost_status": "unknown", "data": {"status": "unknown"},
+            "source": {"entrypoint_sha256": _content_sha256(Path(__file__)),
+                       "dependencies": "unknown", "authenticity": "unverified"},
+            "baseline_status": "not_attempted", "returns_status": "not_requested",
+            "stage": "input",
+            "json_output_status": "not_requested",
+        }
+        # A same-directory hard link publishes the fully written record without
+        # replacing an existing ID. A failed publication never starts the run.
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=directory,
+                                             prefix=".attempt-", delete=False) as stream:
+                temporary = Path(stream.name)
+                json.dump(self.data, stream, sort_keys=True)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.link(temporary, self.path)
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
+
+    def checkpoint(self) -> None:
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=self.path.parent,
+                                             prefix=".attempt-", delete=False) as stream:
+                temporary = Path(stream.name)
+                json.dump(self.data, stream, sort_keys=True)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, self.path)
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
+
+    def finish(self, *, failed_stage: str | None = None) -> None:
+        self.data["status"] = "failed" if failed_stage else "completed"
+        self.data["finished_at"] = datetime.now(timezone.utc).isoformat()
+        if failed_stage:
+            self.data["failure_stage"] = failed_stage
+        self.checkpoint()
+
+
+
+def _run_walk_forward(
     *,
     profile: str,
     windows: tuple[tuple[date, date], ...] = DEFAULT_WINDOWS,
@@ -227,6 +307,7 @@ def run_walk_forward(
     panel: Any = None,
     market_history: Any = None,
     returns_output: Path | None = None,
+    attempt: _Attempt | None = None,
 ) -> dict[str, Any]:
     from quant_platform_kit.strategy_lifecycle.backtest_orchestrator import BacktestOrchestrator
     from quant_platform_kit.strategy_lifecycle.performance_store import PerformanceStore
@@ -247,6 +328,17 @@ def run_walk_forward(
             panel=panel,
             market_history=market_history,
         )
+    if attempt is not None:
+        attempt.data["stage"] = "folds"
+        if shared_panel is not None and shared_market_history is not None:
+            attempt.data["data"] = {"status": "normalized_frames",
+                "panel_sha256": _frame_sha256(shared_panel),
+                "market_history_sha256": _frame_sha256(shared_market_history),
+                "hash_method": "pandas_hash_pandas_object_plus_schema_v1",
+                "pandas_version": pd.__version__, "authenticity": "unverified"}
+        else:
+            attempt.data["data"] = {"status": "unknown", "reason": "runner_generated_or_partial_inputs"}
+        attempt.checkpoint()
     with tempfile.TemporaryDirectory(prefix=f"{profile}_wf_", dir=target_root) as scratch_dir:
         scratch_orchestrator = BacktestOrchestrator(store=PerformanceStore(local_root=Path(scratch_dir)))
         walk_forward_runner = _build_runner(
@@ -271,6 +363,10 @@ def run_walk_forward(
         raise ValueError("walk-forward returns do not cover the 126-day drift baseline")
     baseline_raw = _baseline_from_return_tail(wf_results[-1], full_window_returns)
     orchestrator = BacktestOrchestrator(store=PerformanceStore(local_root=target_root))
+    if attempt is not None:
+        attempt.data["stage"] = "baseline"
+        attempt.data["baseline_status"] = "unknown"
+        attempt.checkpoint()
     baseline = orchestrator.persist_result(
         baseline_raw,
         strategy_profile=profile,
@@ -284,7 +380,15 @@ def run_walk_forward(
             data_fingerprint=data_fingerprint,
         ),
     )
+    if attempt is not None:
+        attempt.data["baseline_status"] = "committed"
+        attempt.data["baseline_run_id"] = getattr(baseline, "run_id", None)
+        attempt.checkpoint()
     if returns_output is not None:
+        if attempt is not None:
+            attempt.data["stage"] = "returns_output"
+            attempt.data["returns_status"] = "unknown"
+            attempt.checkpoint()
         if shared_market_history is None:
             raise ValueError("returns_output requires market_history")
         current_end = min(
@@ -309,6 +413,10 @@ def run_walk_forward(
             returns=current_runner.last_daily_returns,
             market_history=shared_market_history,
         )
+        if attempt is not None:
+            attempt.data["returns_status"] = "written"
+            attempt.data["returns_sha256"] = _content_sha256(returns_output)
+            attempt.checkpoint()
     return {
         "strategy_profile": profile,
         "domain": "crypto",
@@ -316,6 +424,33 @@ def run_walk_forward(
         "walk_forward_folds": [_result_payload(item) for item in wf_results],
         "source": "BacktestOrchestrator.walk_forward",
     }
+
+
+
+def run_walk_forward(*, profile: str, windows=DEFAULT_WINDOWS, synthetic_days: int = 1600,
+                     store_root: Path | None = None, panel: Any = None, market_history: Any = None,
+                     returns_output: Path | None = None, attempt_record_dir: Path | None = None,
+                     _attempt: _Attempt | None = None) -> dict[str, Any]:
+    owned = _attempt is None and attempt_record_dir is not None
+    attempt = _attempt or (_Attempt(attempt_record_dir, profile=profile, windows=windows,
+                                    synthetic_days=synthetic_days) if owned else None)
+    try:
+        result = _run_walk_forward(profile=profile, windows=windows, synthetic_days=synthetic_days,
+            store_root=store_root, panel=panel, market_history=market_history,
+            returns_output=returns_output, attempt=attempt)
+        if attempt is not None:
+            encoded = json.dumps(result, sort_keys=True, separators=(",", ":"),
+                                 default=str).encode("utf-8")
+            attempt.data["result_sha256"] = hashlib.sha256(encoded).hexdigest()
+            attempt.data["result_digest_scope"] = "returned_summary_json_v1"
+            attempt.checkpoint()
+    except Exception:
+        if owned and attempt is not None:
+            attempt.finish(failed_stage=attempt.data["stage"])
+        raise
+    if owned and attempt is not None:
+        attempt.finish()
+    return result
 
 
 def main() -> int:
@@ -328,27 +463,41 @@ def main() -> int:
     parser.add_argument("--panel", type=Path)
     parser.add_argument("--market-history", type=Path)
     parser.add_argument("--returns-output", type=Path)
+    parser.add_argument("--attempt-record-dir", type=Path)
     args = parser.parse_args()
 
     if args.list_profiles:
         print(json.dumps({"profiles": sorted(SUPPORTED_PROFILES)}, indent=2))
         return 0
 
-    panel = pd.read_csv(args.panel, compression="infer") if args.panel else None
-    market_history = pd.read_csv(args.market_history, compression="infer") if args.market_history else None
-    payload = run_walk_forward(
-        profile=args.profile,
-        synthetic_days=args.synthetic_days,
-        store_root=args.store_root,
-        panel=panel,
-        market_history=market_history,
-        returns_output=args.returns_output,
-    )
-    text = json.dumps(payload, indent=2, sort_keys=True, default=str)
-    if args.json_output:
-        args.json_output.parent.mkdir(parents=True, exist_ok=True)
-        args.json_output.write_text(text + "\n")
-    print(text)
+    attempt = (_Attempt(args.attempt_record_dir, profile=args.profile, windows=DEFAULT_WINDOWS,
+                        synthetic_days=args.synthetic_days) if args.attempt_record_dir else None)
+    stage = "input"
+    try:
+        panel = pd.read_csv(args.panel, compression="infer") if args.panel else None
+        market_history = pd.read_csv(args.market_history, compression="infer") if args.market_history else None
+        stage = "run"
+        payload = run_walk_forward(profile=args.profile, synthetic_days=args.synthetic_days,
+            store_root=args.store_root, panel=panel, market_history=market_history,
+            returns_output=args.returns_output, _attempt=attempt)
+        stage = "json_output"
+        text = json.dumps(payload, indent=2, sort_keys=True, default=str)
+        if args.json_output:
+            if attempt is not None:
+                attempt.data["json_output_status"] = "unknown"
+                attempt.checkpoint()
+            args.json_output.parent.mkdir(parents=True, exist_ok=True)
+            args.json_output.write_text(text + "\n")
+            if attempt is not None:
+                attempt.data["json_output_status"] = "written"
+                attempt.data["json_output_sha256"] = _content_sha256(args.json_output)
+        print(text)
+    except Exception:
+        if attempt is not None:
+            attempt.finish(failed_stage=(attempt.data["stage"] if stage == "run" else stage))
+        raise
+    if attempt is not None:
+        attempt.finish()
     return 0
 
 
