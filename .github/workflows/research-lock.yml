@@ -7,10 +7,17 @@ permissions:
   contents: read
 
 jobs:
-  generate:
-    name: Generate research lock candidate
+  verify:
+    name: Frozen research install (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    env:
+      UV_PYTHON: ${{ matrix.python-version }}
+      UV_PROJECT_ENVIRONMENT: ${{ runner.temp }}/crypto-research-environment
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -18,101 +25,74 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python-version }}
 
       - name: Install the lock resolver
         run: python -m pip install uv==0.13.4
 
-      - name: Preserve the input lock
-        run: cp uv.lock "${RUNNER_TEMP}/crypto-research-lock-baseline.lock"
-
-      - name: Resolve the approved Pandas version
-        run: uv lock --upgrade-package pandas==3.1.0
-
-      - name: Record the resolved lock and dependency delta
+      - name: Validate the committed lock
         run: |
-          python - <<'PY'
-          import base64
-          import hashlib
+          uv lock --check
+          git diff --exit-code -- uv.lock
+
+      - name: Install the frozen research environment
+        run: |
+          uv sync --frozen --extra research --no-editable
+          uv pip check --python "${UV_PROJECT_ENVIRONMENT}/bin/python"
+
+      - name: Verify installed versions, origins and public import
+        run: |
+          cd "${RUNNER_TEMP}"
+          "${UV_PROJECT_ENVIRONMENT}/bin/python" -I - "${GITHUB_WORKSPACE}" <<'PY'
+          import importlib
+          import importlib.metadata
           import json
-          import os
           from pathlib import Path
-          import subprocess
+          import sys
+          import sysconfig
           import tomllib
 
-          baseline_bytes = (Path(os.environ["RUNNER_TEMP"]) / "crypto-research-lock-baseline.lock").read_bytes()
-          candidate_bytes = Path("uv.lock").read_bytes()
-          baseline = tomllib.loads(baseline_bytes.decode())
-          candidate = tomllib.loads(candidate_bytes.decode())
-          project = tomllib.loads(Path("pyproject.toml").read_text())["project"]
+          source = Path(sys.argv[1])
+          project = tomllib.loads((source / "pyproject.toml").read_text())["project"]
+          lock = tomllib.loads((source / "uv.lock").read_text())
+          prefix = "quant-platform-kit @ git+https://github.com/QuantStrategyLab/QuantPlatformKit.git@"
+          pins = [value.removeprefix(prefix) for value in project["dependencies"] if value.startswith(prefix)]
+          assert len(pins) == 1
+          qpk = importlib.metadata.distribution("quant-platform-kit")
+          direct_url = json.loads(qpk.read_text("direct_url.json"))
+          assert direct_url["vcs_info"]["commit_id"] == pins[0]
+          assert direct_url["vcs_info"]["vcs"] == "git"
+          assert direct_url["url"] == "https://github.com/QuantStrategyLab/QuantPlatformKit.git"
 
-          def records(document):
-              result = {}
-              for package in document["package"]:
-                  result.setdefault(package["name"], []).append(package)
-              return result
-
-          def identities(packages):
-              return sorted(
-                  (package["version"], json.dumps(package["source"], sort_keys=True))
-                  for package in packages
-              )
-
-          before = records(baseline)
-          after = records(candidate)
-          names = sorted(set(before) | set(after))
-          identity_changes = {
-              name: {"before": identities(before.get(name, [])), "after": identities(after.get(name, []))}
-              for name in names if identities(before.get(name, [])) != identities(after.get(name, []))
+          installed = {name: importlib.metadata.version(name) for name in ("numpy", "pandas")}
+          locked = {
+              name: [package["version"] for package in lock["package"] if package["name"] == name]
+              for name in installed
           }
-          root_package = after[project["name"]][0]
-          research_requirements = [
-              item for item in root_package["metadata"]["requires-dist"]
-              if item.get("marker") == "extra == 'research'"
-          ]
-          receipt = {
-              "source_commit": os.environ["GITHUB_SHA"],
-              "uv_version": subprocess.check_output(["uv", "--version"], text=True).strip(),
-              "baseline_lock_sha256": hashlib.sha256(baseline_bytes).hexdigest(),
-              "candidate_lock_sha256": hashlib.sha256(candidate_bytes).hexdigest(),
-              "package_identity_changes": identity_changes,
-              "changed_package_records": [name for name in names if before.get(name) != after.get(name)],
-              "declared_research_requirements": project["optional-dependencies"]["research"],
-              "locked_research_requirements": research_requirements,
-              "qpk_source_unchanged": before["quant-platform-kit"] == after["quant-platform-kit"],
-              "candidate_generated": True,
-              "adoption_authorized_by_this_job": False,
-          }
-          output = Path(os.environ["RUNNER_TEMP"]) / "crypto-research-lock"
-          output.mkdir()
-          (output / "uv.lock").write_bytes(candidate_bytes)
-          (output / "resolution-receipt.json").write_text(json.dumps(receipt, indent=2) + "\n")
-          print(json.dumps(receipt, indent=2))
-          encoded = base64.b64encode(candidate_bytes).decode("ascii")
-          chunks = [encoded[index:index + 4096] for index in range(0, len(encoded), 4096)]
-          print("UV_LOCK_BASE64_BEGIN")
-          print(f"UV_LOCK_BYTE_LENGTH={len(candidate_bytes)}")
-          print(f"UV_LOCK_SHA256={receipt['candidate_lock_sha256']}")
-          print(f"UV_LOCK_BASE64_CHUNKS={len(chunks)}")
-          for index, chunk in enumerate(chunks):
-              print(f"UV_LOCK_BASE64_{index:04d}={chunk}")
-          print("UV_LOCK_BASE64_END")
+          assert all(installed[name] in locked[name] for name in installed)
+          assert sys.prefix != sys.base_prefix and sys.flags.isolated
+          roots = tuple(Path(sysconfig.get_path(key)).resolve() for key in ("purelib", "platlib"))
+          assert all(root.is_relative_to(Path(sys.prefix).resolve()) for root in roots)
+          modules = ("crypto_strategies", "quant_platform_kit", "numpy", "pandas", "crypto_strategies.entrypoints")
+          assert not any(name in sys.modules for name in modules)
+          network_attempts = []
 
-          assert set(identity_changes) == {"pandas"}, identity_changes
-          assert {package["version"] for package in after["pandas"]} == {"3.1.0"}
-          assert receipt["qpk_source_unchanged"]
-          assert {item["name"]: item["specifier"] for item in research_requirements} == {
-              "numpy": ">=2.4.6", "pandas": ">=3.1.0",
-          }
+          def network_guard(event, arguments):
+              if event in {"socket.connect", "socket.bind", "socket.getaddrinfo"}:
+                  network_attempts.append(event)
+                  raise RuntimeError("network access attempted during the import probe")
+
+          sys.addaudithook(network_guard)
+          importlib.import_module("crypto_strategies.entrypoints")
+          origins = {name: str(Path(sys.modules[name].__file__).resolve()) for name in modules}
+          assert all(any(Path(origin).is_relative_to(root) for root in roots) for origin in origins.values())
+          assert not network_attempts
+          print(json.dumps({
+              "runtime_import_succeeded": True,
+              "installed_versions": installed,
+              "locked_versions": locked,
+              "qpk_commit": pins[0],
+              "module_origins": origins,
+              "network_attempts": network_attempts,
+          }, indent=2))
           PY
-
-      - name: Preserve the generated lock for review
-        if: always()
-        uses: actions/upload-artifact@v7.0.2
-        with:
-          name: crypto-research-lock-${{ github.sha }}
-          path: |
-            ${{ runner.temp }}/crypto-research-lock/uv.lock
-            ${{ runner.temp }}/crypto-research-lock/resolution-receipt.json
-          if-no-files-found: error
-          retention-days: 7
