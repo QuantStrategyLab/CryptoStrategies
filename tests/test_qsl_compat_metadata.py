@@ -27,7 +27,7 @@ def test_qpk_pin_lock_and_ci_are_dependency_enabled() -> None:
     with (ROOT / "uv.lock").open("rb") as file:
         lock = tomllib.load(file)
 
-    assert pyproject["project"]["dependencies"] == [QPK_URL]
+    assert pyproject["project"]["dependencies"] == ["numpy", "pandas", QPK_URL]
     assert qsl["compat"]["requires"] == [QPK_URL]
 
     packages = {package["name"]: package for package in lock["package"]}
