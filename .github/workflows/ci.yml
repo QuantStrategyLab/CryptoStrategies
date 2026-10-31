@@ -98,3 +98,59 @@ jobs:
         run: |
           set -euo pipefail
           python -m build
+
+  normal-wheel-baseline:
+    name: Normal wheel baseline (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Build the normal wheel
+        run: |
+          set -euo pipefail
+          python -m pip install build
+          python -m build --wheel --outdir dist
+          sha256sum dist/*.whl
+
+      - name: Install only the wheel and its declared dependencies
+        run: |
+          set -euo pipefail
+          python -m venv "${RUNNER_TEMP}/crypto-normal-wheel"
+          wheels=(dist/*.whl)
+          test "${#wheels[@]}" -eq 1
+          test -f "${wheels[0]}"
+          "${RUNNER_TEMP}/crypto-normal-wheel/bin/python" -I -m pip install \
+            --no-cache-dir --report "${RUNNER_TEMP}/normal-wheel-install.json" \
+            "${wheels[0]}"
+          "${RUNNER_TEMP}/crypto-normal-wheel/bin/python" -I -m pip check
+
+      - name: Reproduce the missing runtime dependency
+        run: |
+          set -euo pipefail
+          qpk_commit="$(python - <<'PY'
+          import re
+          import tomllib
+          from pathlib import Path
+
+          dependencies = tomllib.loads(Path("pyproject.toml").read_text())["project"]["dependencies"]
+          prefix = "quant-platform-kit @ git+https://github.com/QuantStrategyLab/QuantPlatformKit.git@"
+          matches = [item.removeprefix(prefix) for item in dependencies if item.startswith(prefix)]
+          assert len(matches) == 1 and re.fullmatch(r"[0-9a-f]{40}", matches[0]), matches
+          print(matches[0])
+          PY
+          )"
+          cd "${RUNNER_TEMP}"
+          "${RUNNER_TEMP}/crypto-normal-wheel/bin/python" -I \
+            "${GITHUB_WORKSPACE}/scripts/check_normal_wheel_install.py" \
+            --expected-qpk-commit "${qpk_commit}" --expect-missing pandas
