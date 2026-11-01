@@ -1,0 +1,101 @@
+name: Research lock
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Frozen research install (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    env:
+      UV_PYTHON: ${{ matrix.python-version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install the lock resolver
+        run: python -m pip install uv==0.13.4
+
+      - name: Validate the committed lock
+        run: |
+          uv lock --check
+          git diff --exit-code -- uv.lock
+
+      - name: Install the frozen research environment
+        env:
+          UV_PROJECT_ENVIRONMENT: ${{ runner.temp }}/crypto-research-environment
+        run: |
+          uv sync --frozen --extra research --no-editable
+          uv pip check --python "${UV_PROJECT_ENVIRONMENT}/bin/python"
+
+      - name: Verify installed versions, origins and public import
+        env:
+          UV_PROJECT_ENVIRONMENT: ${{ runner.temp }}/crypto-research-environment
+        run: |
+          cd "${RUNNER_TEMP}"
+          "${UV_PROJECT_ENVIRONMENT}/bin/python" -I - "${GITHUB_WORKSPACE}" <<'PY'
+          import importlib
+          import importlib.metadata
+          import json
+          from pathlib import Path
+          import sys
+          import sysconfig
+          import tomllib
+
+          source = Path(sys.argv[1])
+          project = tomllib.loads((source / "pyproject.toml").read_text())["project"]
+          lock = tomllib.loads((source / "uv.lock").read_text())
+          prefix = "quant-platform-kit @ git+https://github.com/QuantStrategyLab/QuantPlatformKit.git@"
+          pins = [value.removeprefix(prefix) for value in project["dependencies"] if value.startswith(prefix)]
+          assert len(pins) == 1
+          qpk = importlib.metadata.distribution("quant-platform-kit")
+          direct_url = json.loads(qpk.read_text("direct_url.json"))
+          assert direct_url["vcs_info"]["commit_id"] == pins[0]
+          assert direct_url["vcs_info"]["vcs"] == "git"
+          assert direct_url["url"] == "https://github.com/QuantStrategyLab/QuantPlatformKit.git"
+
+          installed = {name: importlib.metadata.version(name) for name in ("numpy", "pandas")}
+          locked = {
+              name: [package["version"] for package in lock["package"] if package["name"] == name]
+              for name in installed
+          }
+          assert all(installed[name] in locked[name] for name in installed)
+          assert sys.prefix != sys.base_prefix and sys.flags.isolated
+          roots = tuple(Path(sysconfig.get_path(key)).resolve() for key in ("purelib", "platlib"))
+          assert all(root.is_relative_to(Path(sys.prefix).resolve()) for root in roots)
+          modules = ("crypto_strategies", "quant_platform_kit", "numpy", "pandas", "crypto_strategies.entrypoints")
+          assert not any(name in sys.modules for name in modules)
+          network_attempts = []
+
+          def network_guard(event, arguments):
+              if event in {"socket.connect", "socket.bind", "socket.getaddrinfo"}:
+                  network_attempts.append(event)
+                  raise RuntimeError("network access attempted during the import probe")
+
+          sys.addaudithook(network_guard)
+          importlib.import_module("crypto_strategies.entrypoints")
+          origins = {name: str(Path(sys.modules[name].__file__).resolve()) for name in modules}
+          assert all(any(Path(origin).is_relative_to(root) for root in roots) for origin in origins.values())
+          assert not network_attempts
+          print(json.dumps({
+              "runtime_import_succeeded": True,
+              "installed_versions": installed,
+              "locked_versions": locked,
+              "qpk_commit": pins[0],
+              "module_origins": origins,
+              "network_attempts": network_attempts,
+          }, indent=2))
+          PY

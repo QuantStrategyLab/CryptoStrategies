@@ -1,6 +1,6 @@
 # ADR 0002: Declare runtime monitoring dependencies
 
-Status: proposed; dependency adoption requires owner approval
+Status: accepted
 
 ## Context
 
@@ -55,7 +55,7 @@ configured proxy was unreachable. That was an environment failure, not evidence
 of the missing dependency. The successful CI installations above establish the
 normal-install result independently.
 
-## Proposed decision
+## Decision
 
 Declare `numpy` and `pandas` as normal Crypto runtime requirements, preserving
 the QPK source pin, package version, runtime imports and strategy implementation.
@@ -71,23 +71,35 @@ existing constraints to pip. Constraints restrict resolution; they do not
 install otherwise undeclared packages. This case verifies installation and
 entrypoint-import compatibility, not the complete consumer runtime.
 
-Keep the `research` extra unchanged. Add normal dependency edges to Crypto's
-root `uv.lock` record using the already locked NumPy and Pandas nodes, and add
-the corresponding normal metadata entries. No resolved package version,
-artifact, source revision, resolution marker or research edge changes. This is
-a five-line root metadata update, not a lock regeneration.
+The initial runtime declaration change preserved the `research` extra and added
+normal dependency edges to the root lock record without changing resolved
+package versions. The lock reconciliation below is a separate change.
 
-### Existing research lock inconsistency
+### Shared project lock reconciliation
 
-The baseline project requests `pandas>=3.1.0` for `research`, while the lock's
-research metadata requests `>=3.0.5` and its Pandas node is 3.0.5. The mismatch
-predates this proposal. Resolving it can change versions or the research
-contract and is outside the authorized packaging declaration.
+The project declares `pandas>=3.1.0` for `research`. The previous lock instead
+recorded a `>=3.0.5` research edge and Pandas 3.0.5. The reconciled lock selects
+Pandas 3.1.0 and records the unchanged declared constraint. Other package
+versions and source revisions, including QPK, remain unchanged.
+
+The lock is generated with uv 0.13.4 using
+`uv lock --upgrade-package pandas==3.1.0`. The resolver updates the lock format
+revision from 3 to 5 and reorders the existing resolution markers and root
+dependency metadata. The marker set is unchanged. Pandas source and wheel
+metadata come directly from that resolver output. CI validates the lock with
+the same uv version; compatibility with earlier resolver versions is untested.
+
+This repository has one shared `uv.lock`. Its Pandas selection applies to both
+normal frozen sync and research sync; it is not an extra-specific lock. The
+normal wheel requirements remain unbounded. Downstream consumer locks and the
+Binance Pandas 3.0.3 installation constraint remain unchanged.
 
 The QPK pin-consistency check validates shared Git references; it does not prove
-general lock consistency or research-extra reproducibility. This proposal makes
-no claim that the existing research lock is coherent. Reconciliation requires a
-separate reviewed change and owner approval for any dependency-version change.
+general lock consistency. Regression tests compare the research declarations,
+locked metadata and selected versions. A separate CI job checks the committed
+lock, performs a frozen research installation and verifies installed versions
+and the public entrypoint import. Generating a lock candidate alone is not a
+successful frozen-install check.
 
 ## Validation
 
@@ -107,8 +119,9 @@ with the existing Binance numeric constraints. Each job:
 Offline tests cover the verifier's rejection paths. The previous CI jobs remain
 intact, including strategy tests, Ruff, package build and shared-pin checks. No
 existing skip or assertion is weakened. Runtime source is byte-for-byte
-unchanged; normal installation and full repository CI must pass on the reviewed
-proposal before it is considered ready for adoption review.
+unchanged. Normal installation, frozen research installation and full repository
+CI must pass on the independently reviewed change. Repository acceptance uses
+automated checks, independent AI review and risk classification.
 
 These checks cover the public entrypoint import and existing test suite. They do
 not establish the dependency closure of every optional runtime module, exercise
@@ -141,14 +154,16 @@ establish a complete installation or preserve the current failure boundary.
 ## Consequences, adoption and rollback
 
 The declaration enlarges the normal installation and participates in consumer
-dependency resolution. Green CI is packaging evidence; it does not authorize a
-production dependency update. The proposal remains a draft until the owner
-approves adoption. No production pin or deployment changes with this proposal.
+dependency resolution. The shared project lock selects Pandas 3.1.0 without
+changing a downstream production pin or deploying a consumer. Green CI remains
+packaging and test evidence; it does not authorize live trading or deployment.
 
-If adopted and later reverted, restore the previous consumer package and lock
-state through a reviewed revert. Keep the reproduction record: reverting the
-declaration restores the known normal-install gap. Resolve the separate
-research lock inconsistency without silently changing its contract.
+The runtime declaration and shared-lock reconciliation can be reverted
+separately through reviewed changes. Reverting the declaration restores the
+known normal-install gap. Reverting only the lock reconciliation restores the
+recorded research constraint mismatch; it does not remove the runtime
+dependency declarations. Preserve the reproduction and verification records
+when assessing either rollback.
 
 [crypto-deps]: https://github.com/QuantStrategyLab/CryptoStrategies/blob/ec0b330081213f56c3ff98164ec00ba26c10dfc9/pyproject.toml#L11-L19
 [crypto-common]: https://github.com/QuantStrategyLab/CryptoStrategies/blob/ec0b330081213f56c3ff98164ec00ba26c10dfc9/src/crypto_strategies/entrypoints/_common.py#L9-L14
