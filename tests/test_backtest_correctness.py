@@ -375,16 +375,15 @@ def test_synthetic_panel_digest_is_stable_across_hash_seeds() -> None:
     assert digest(1) == digest(1)
 
 
-def test_research_dependencies_are_optional_only() -> None:
+def test_runtime_monitoring_dependencies_preserve_research_extra() -> None:
     root = Path(__file__).resolve().parents[1]
     with (root / "pyproject.toml").open("rb") as handle:
         project = tomllib.load(handle)["project"]
 
+    assert project["optional-dependencies"]["research"] == [
+        "numpy>=2.4.6", "pandas>=3.1.0",
+    ]
     assert {"numpy", "pandas"} <= {
-        requirement.split(">", 1)[0].split("=", 1)[0].split("<", 1)[0]
-        for requirement in project["optional-dependencies"]["research"]
-    }
-    assert not {"numpy", "pandas"} & {
         requirement.split(">", 1)[0].split("=", 1)[0].split("<", 1)[0]
         for requirement in project["dependencies"]
     }
