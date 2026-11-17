@@ -1168,6 +1168,118 @@ class CryptoStrategyEntrypointTests(unittest.TestCase):
                         "BLOCKED",
                     )
 
+    def test_entrypoints_package_exports_match_submodules(self) -> None:
+        from crypto_strategies import entrypoints
+        from crypto_strategies.entrypoints import (
+            btc_dca,
+            equity_combo,
+            live_pool_rotation,
+            trend_rotation,
+        )
+
+        self.assertIs(entrypoints.crypto_live_pool_rotation_entrypoint, live_pool_rotation.crypto_live_pool_rotation_entrypoint)
+        self.assertIs(entrypoints.evaluate_crypto_live_pool_rotation, live_pool_rotation.evaluate_crypto_live_pool_rotation)
+        self.assertIs(entrypoints.crypto_btc_dca_entrypoint, btc_dca.crypto_btc_dca_entrypoint)
+        self.assertIs(entrypoints.evaluate_crypto_btc_dca, btc_dca.evaluate_crypto_btc_dca)
+        self.assertIs(entrypoints.crypto_trend_rotation_entrypoint, trend_rotation.crypto_trend_rotation_entrypoint)
+        self.assertIs(entrypoints.evaluate_crypto_trend_rotation, trend_rotation.evaluate_crypto_trend_rotation)
+        self.assertIs(entrypoints.crypto_equity_combo_entrypoint, equity_combo.crypto_equity_combo_entrypoint)
+        self.assertIs(entrypoints.evaluate_crypto_equity_combo, equity_combo.evaluate_crypto_equity_combo)
+
+    def test_resolve_account_metrics_cash_contract_and_no_silent_zero_fallback(self) -> None:
+        from crypto_strategies.entrypoints import _resolve_account_metrics
+
+        now = _fresh_as_of()
+
+        # 1. metadata["account_metrics"] explicit contract
+        ctx_embedded = StrategyContext(
+            as_of=now,
+            market_data={},
+            portfolio=PortfolioSnapshot(
+                as_of=now,
+                total_equity=1000.0,
+                metadata={
+                    "account_metrics": {
+                        "total_equity": 1000.0,
+                        "cash_usdt": 250.0,
+                        "trend_value": 500.0,
+                        "dca_value": 250.0,
+                    }
+                },
+            ),
+        )
+        self.assertEqual(
+            _resolve_account_metrics(ctx_embedded),
+            {"total_equity": 1000.0, "cash_usdt": 250.0, "trend_value": 500.0, "dca_value": 250.0},
+        )
+
+        # 2. metadata["cash_available_for_trading"] canonical metadata contract takes priority
+        ctx_meta_cash = StrategyContext(
+            as_of=now,
+            market_data={},
+            portfolio=PortfolioSnapshot(
+                as_of=now,
+                total_equity=1000.0,
+                buying_power=100.0,
+                cash_balance=50.0,
+                metadata={"cash_available_for_trading": 300.0},
+            ),
+        )
+        self.assertEqual(_resolve_account_metrics(ctx_meta_cash)["cash_usdt"], 300.0)
+
+        # 3. snapshot.buying_power primary field
+        ctx_buying_power = StrategyContext(
+            as_of=now,
+            market_data={},
+            portfolio=PortfolioSnapshot(as_of=now, total_equity=1000.0, buying_power=400.0, cash_balance=200.0),
+        )
+        self.assertEqual(_resolve_account_metrics(ctx_buying_power)["cash_usdt"], 400.0)
+
+        # 4. snapshot.cash_balance fallback when buying_power is None
+        ctx_cash_balance = StrategyContext(
+            as_of=now,
+            market_data={},
+            portfolio=PortfolioSnapshot(as_of=now, total_equity=1000.0, buying_power=None, cash_balance=450.0),
+        )
+        self.assertEqual(_resolve_account_metrics(ctx_cash_balance)["cash_usdt"], 450.0)
+
+        # 5. Missing all explicit cash sources must fail closed instead of defaulting to 0.0
+        ctx_missing_cash = StrategyContext(
+            as_of=now,
+            market_data={},
+            portfolio=PortfolioSnapshot(as_of=now, total_equity=1000.0, buying_power=None, cash_balance=None),
+        )
+        with self.assertRaisesRegex(ValueError, "missing required cash field"):
+            _resolve_account_metrics(ctx_missing_cash)
+
+        # Invalid higher-priority cash or account_metrics fields fail closed instead of falling back.
+        for bad_snapshot in (
+            PortfolioSnapshot(
+                as_of=now,
+                total_equity=1000.0,
+                buying_power=500.0,
+                metadata={"cash_available_for_trading": float("nan")},
+            ),
+            PortfolioSnapshot(
+                as_of=now,
+                total_equity=1000.0,
+                buying_power=True,  # type: ignore[arg-type]
+                cash_balance=500.0,
+            ),
+            PortfolioSnapshot(
+                as_of=now,
+                total_equity=1000.0,
+                metadata={"account_metrics": {"total_equity": 1000.0, "cash_usdt": 100.0}},
+            ),
+            PortfolioSnapshot(
+                as_of=now,
+                total_equity=1000.0,
+                metadata={"account_metrics": "invalid"},
+            ),
+        ):
+            with self.subTest(bad_snapshot=bad_snapshot), self.assertRaises(ValueError):
+                _resolve_account_metrics(StrategyContext(as_of=now, market_data={}, portfolio=bad_snapshot))
+
 
 if __name__ == "__main__":
     unittest.main()

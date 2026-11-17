@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from dataclasses import FrozenInstanceError
+import inspect
 import math
 import unittest
 
 
+from crypto_strategies.manifests import crypto_btc_dca_manifest
 from crypto_strategies.strategies.crypto_btc_dca import (
     PROFILE_NAME,
     CRYPTO_DOMAIN,
@@ -13,6 +16,11 @@ from crypto_strategies.strategies.crypto_btc_dca import (
     STATUS_ICON,
     DEFAULT_SIGNAL_SYMBOL,
     DEFAULT_PARKING_SYMBOL,
+    Ahr999Spec,
+    BtcDcaPlanConfig,
+    DrawdownTierSpec,
+    ExecutionWindowSpec,
+    ZScoreExitSpec,
     build_rebalance_plan,
     build_target_weights,
     compute_signals,
@@ -394,6 +402,135 @@ class PublicApiTest(unittest.TestCase):
 
     def test_extract_managed_symbols(self) -> None:
         self.assertEqual(extract_managed_symbols(), ("BTCUSDT",))
+
+
+class BtcDcaPlanConfigTest(unittest.TestCase):
+    def test_specs_and_plan_config_are_frozen_slotted_value_objects(self) -> None:
+        instances = (
+            ExecutionWindowSpec(),
+            DrawdownTierSpec(),
+            Ahr999Spec(),
+            ZScoreExitSpec(),
+            BtcDcaPlanConfig(),
+        )
+        for instance in instances:
+            self.assertFalse(hasattr(instance, "__dict__"))
+        with self.assertRaises(FrozenInstanceError):
+            instances[0].cadence = "weekly"  # type: ignore[misc]
+        with self.assertRaises(FrozenInstanceError):
+            instances[1].mild_drawdown_threshold = 0.2  # type: ignore[misc]
+        with self.assertRaises(FrozenInstanceError):
+            instances[2].bottom_threshold = 0.5  # type: ignore[misc]
+        with self.assertRaises(FrozenInstanceError):
+            instances[3].enabled = False  # type: ignore[misc]
+        with self.assertRaises(FrozenInstanceError):
+            instances[4].base_investment_usd = 200.0  # type: ignore[misc]
+
+    def test_build_rebalance_plan_converged_signature_and_equivalence(self) -> None:
+        params = list(inspect.signature(build_rebalance_plan).parameters)
+        self.assertEqual(
+            params,
+            [
+                "portfolio",
+                "as_of",
+                "config",
+                "derived_indicators",
+                "zscore_exit_context",
+                "translator",
+                "strict_buy_window",
+                "legacy_kwargs",
+            ],
+        )
+        flat_kwargs = {
+            "base_investment_usd": 250.0,
+            "max_investment_usd": 400.0,
+            "cash_reserve_usd": 100.0,
+            "cadence": "weekly",
+            "weekly_day": 3,
+            "weekly_window_calendar_days": 2,
+            "ahr999_bottom_threshold": 0.50,
+            "ahr999_bottom_multiplier": 2.0,
+            "zscore_exit_enabled": True,
+            "zscore_exit_risk_reduced_exposure": 0.40,
+        }
+        config = BtcDcaPlanConfig.from_kwargs(**flat_kwargs)
+        self.assertEqual(config.execution_window.cadence, "weekly")
+        self.assertEqual(config.execution_window.weekly_day, 3)
+        self.assertEqual(config.ahr999.bottom_threshold, 0.50)
+        self.assertEqual(config.ahr999.bottom_multiplier, 2.0)
+        self.assertEqual(config.zscore_exit.risk_reduced_exposure, 0.40)
+
+        portfolio = FakePortfolio(buying_power=5000.0, btc_price=60000.0, btc_units=0.5)
+        indicators = {"BTCUSDT": {"close": 60000.0, "sma200": 50000.0, "ahr999": 0.40}}
+        exit_ctx = {"plugin": "btc_zscore_exit", "canonical_route": "risk_reduced"}
+
+        plan_from_config = build_rebalance_plan(
+            portfolio,
+            as_of="2026-05-28",
+            config=config,
+            derived_indicators=indicators,
+            zscore_exit_context=exit_ctx,
+        )
+        plan_from_legacy = build_rebalance_plan(
+            portfolio,
+            as_of="2026-05-28",
+            derived_indicators=indicators,
+            zscore_exit_context=exit_ctx,
+            **flat_kwargs,
+        )
+        self.assertEqual(
+            {k: v for k, v in plan_from_config.items() if not (isinstance(v, float) and math.isnan(v))},
+            {k: v for k, v in plan_from_legacy.items() if not (isinstance(v, float) and math.isnan(v))},
+        )
+
+        signals_from_config = compute_signals(
+            prices={"BTCUSDT": 60000.0},
+            portfolio=portfolio,
+            total_equity=50000.0,
+            config=config,
+            derived_indicators=indicators,
+            as_of="2026-05-28",
+            zscore_exit_context=exit_ctx,
+        )
+        signals_from_legacy = compute_signals(
+            prices={"BTCUSDT": 60000.0},
+            portfolio=portfolio,
+            total_equity=50000.0,
+            derived_indicators=indicators,
+            as_of="2026-05-28",
+            zscore_exit_context=exit_ctx,
+            **flat_kwargs,
+        )
+        self.assertEqual(
+            signals_from_config["metadata"]["planned_investment_usd"],
+            signals_from_legacy["metadata"]["planned_investment_usd"],
+        )
+        self.assertEqual(
+            signals_from_config["metadata"]["target_values"],
+            signals_from_legacy["metadata"]["target_values"],
+        )
+
+    def test_from_kwargs_covers_manifest_and_rejects_unknown_or_mixed_args(self) -> None:
+        legacy_ratio_keys = {
+            "target_ratio_min",
+            "target_ratio_max",
+            "ratio_base",
+            "ratio_scale",
+            "equity_normalizer",
+        }
+        manifest_plan_keys = set(crypto_btc_dca_manifest.default_config) - legacy_ratio_keys
+        self.assertLessEqual(manifest_plan_keys, BtcDcaPlanConfig.supported_kwarg_names())
+
+        with self.assertRaises(TypeError):
+            BtcDcaPlanConfig.from_kwargs(unknown_field=123)
+        with self.assertRaises(TypeError):
+            build_rebalance_plan(FakePortfolio(), unknown_field=123)
+        with self.assertRaises(TypeError):
+            build_rebalance_plan(
+                FakePortfolio(),
+                config=BtcDcaPlanConfig(),
+                base_investment_usd=200.0,
+            )
 
 
 if __name__ == "__main__":
