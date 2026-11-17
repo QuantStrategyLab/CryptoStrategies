@@ -34,7 +34,7 @@ CI also verifies dependency refs and builds the package. The repository
 CONTRIBUTING file uses a local `../QuantPlatformKit` checkout; CI resolves the
 pinned revision instead, so prefer the pinned ref for reproducible results.
 
-Organization documentation rules are checked by `python scripts/check_style.py --phase 2` (`Documentation check` in CI).
+Organization documentation rules run in CI via `QuantStrategyLab/.github/.github/workflows/docs-acceptance.yml` (`Documentation check`), or offline with a sibling `QuantStrategyLab/.github` checkout (`git clone https://github.com/QuantStrategyLab/.github ../.github && python3 ../.github/scripts/check_style.py --root . --phase 2`).
 
 ## Naming and documentation
 
