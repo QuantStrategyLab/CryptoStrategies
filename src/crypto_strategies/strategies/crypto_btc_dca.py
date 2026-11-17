@@ -34,9 +34,10 @@ externally by the entrypoint / combo.
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field, fields
 import logging
 import math
-from collections.abc import Mapping, Sequence
 from typing import Any
 
 import pandas as pd
@@ -67,6 +68,188 @@ BITCOIN_GENESIS_DATE = pd.Timestamp("2009-01-03")
 
 ZSCORE_EXIT_PROFILE = "btc_zscore_exit"
 ZSCORE_EXIT_POSITION_ROUTES = frozenset({"normal", "risk_on", "risk_reduced", "risk_off"})
+
+
+# ---------------------------------------------------------------------------
+# Immutable Plan Configuration Value Objects
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class ExecutionWindowSpec:
+    """Execution cadence and calendar window parameters."""
+
+    cadence: str = "monthly"
+    monthly_day: int = 25
+    monthly_window_calendar_days: int = 5
+    weekly_day: int = 4
+    weekly_window_calendar_days: int = 4
+    quarterly_months: object = (1, 4, 7, 10)
+    quarterly_day: int = 25
+    quarterly_window_calendar_days: int = 5
+
+
+@dataclass(frozen=True, slots=True)
+class DrawdownTierSpec:
+    """Drawdown, SMA200 gap, and RSI thresholds with pullback multipliers."""
+
+    mild_drawdown_threshold: float = 0.12
+    deep_drawdown_threshold: float = 0.25
+    severe_drawdown_threshold: float = 0.40
+    mild_discount_gap: float = 0.08
+    deep_discount_gap: float = 0.18
+    expensive_gap: float = 0.30
+    very_expensive_gap: float = 0.60
+    shallow_drawdown_threshold: float = 0.05
+    overbought_rsi: float = 75.0
+    mild_pullback_multiplier: float = 1.50
+    deep_pullback_multiplier: float = 2.25
+    severe_pullback_multiplier: float = 3.0
+    expensive_multiplier: float = 1.0
+    very_expensive_multiplier: float = 1.0
+
+
+@dataclass(frozen=True, slots=True)
+class Ahr999Spec:
+    """AHR999 cycle valuation thresholds and multipliers."""
+
+    bottom_threshold: float = 0.45
+    accumulation_threshold: float = 0.80
+    dca_threshold: float = 1.20
+    bottom_multiplier: float = 3.0
+    accumulation_multiplier: float = 2.25
+    dca_multiplier: float = 1.50
+    expensive_multiplier: float = 0.0
+
+
+@dataclass(frozen=True, slots=True)
+class ZScoreExitSpec:
+    """MVRV Z-Score exit overlay parameters."""
+
+    enabled: bool = True
+    parking_symbol: str = DEFAULT_PARKING_SYMBOL
+    risk_reduced_exposure: float = 0.50
+    risk_off_exposure: float = 0.25
+    allow_outside_execution_window: bool = True
+
+
+_TOP_LEVEL_PLAN_FIELDS: frozenset[str] = frozenset({
+    "signal_symbol",
+    "base_investment_usd",
+    "max_investment_usd",
+    "cash_reserve_usd",
+    "min_investment_usd",
+    "smart_multiplier_enabled",
+    "cycle_indicator_enabled",
+    "base_multiplier",
+})
+
+_EXECUTION_WINDOW_FIELDS: frozenset[str] = frozenset(
+    f.name for f in fields(ExecutionWindowSpec)
+)
+
+_DRAWDOWN_TIER_FIELDS: frozenset[str] = frozenset(
+    f.name for f in fields(DrawdownTierSpec)
+)
+
+_AHR999_KWARG_TO_FIELD: dict[str, str] = {
+    "ahr999_bottom_threshold": "bottom_threshold",
+    "ahr999_accumulation_threshold": "accumulation_threshold",
+    "ahr999_dca_threshold": "dca_threshold",
+    "ahr999_bottom_multiplier": "bottom_multiplier",
+    "ahr999_accumulation_multiplier": "accumulation_multiplier",
+    "ahr999_dca_multiplier": "dca_multiplier",
+    "ahr999_expensive_multiplier": "expensive_multiplier",
+}
+
+_ZSCORE_EXIT_KWARG_TO_FIELD: dict[str, str] = {
+    "zscore_exit_enabled": "enabled",
+    "zscore_exit_parking_symbol": "parking_symbol",
+    "zscore_exit_risk_reduced_exposure": "risk_reduced_exposure",
+    "zscore_exit_risk_off_exposure": "risk_off_exposure",
+    "zscore_exit_allow_outside_execution_window": "allow_outside_execution_window",
+}
+
+_SUPPORTED_PLAN_KWARGS: frozenset[str] = (
+    _TOP_LEVEL_PLAN_FIELDS
+    | _EXECUTION_WINDOW_FIELDS
+    | _DRAWDOWN_TIER_FIELDS
+    | frozenset(_AHR999_KWARG_TO_FIELD)
+    | frozenset(_ZSCORE_EXIT_KWARG_TO_FIELD)
+)
+
+
+def _build_spec_from_mapped_kwargs(
+    spec_cls: type[Any],
+    kwarg_to_field: Mapping[str, str],
+    kwargs: Mapping[str, Any],
+) -> Any:
+    unknown = set(kwargs) - set(kwarg_to_field)
+    if unknown:
+        raise TypeError(f"unexpected keyword argument for {spec_cls.__name__}: {sorted(unknown)[0]!r}")
+    mapped = {
+        field_name: kwargs[kwarg_name]
+        for kwarg_name, field_name in kwarg_to_field.items()
+        if kwarg_name in kwargs
+    }
+    return spec_cls(**mapped)
+
+
+@dataclass(frozen=True, slots=True)
+class BtcDcaPlanConfig:
+    """Aggregated immutable configuration for ``build_rebalance_plan``."""
+
+    signal_symbol: str = DEFAULT_SIGNAL_SYMBOL
+    base_investment_usd: float = 100.0
+    max_investment_usd: float | None = None
+    cash_reserve_usd: float = 0.0
+    min_investment_usd: float = 5.0
+    smart_multiplier_enabled: bool = True
+    cycle_indicator_enabled: bool = True
+    base_multiplier: float = 1.0
+    execution_window: ExecutionWindowSpec = field(default_factory=ExecutionWindowSpec)
+    drawdown_tiers: DrawdownTierSpec = field(default_factory=DrawdownTierSpec)
+    ahr999: Ahr999Spec = field(default_factory=Ahr999Spec)
+    zscore_exit: ZScoreExitSpec = field(default_factory=ZScoreExitSpec)
+
+    @classmethod
+    def supported_kwarg_names(cls) -> frozenset[str]:
+        """Return all flat configuration keyword names accepted by ``from_kwargs``."""
+        return _SUPPORTED_PLAN_KWARGS
+
+    @classmethod
+    def from_kwargs(cls, **kwargs: Any) -> BtcDcaPlanConfig:
+        """Construct a ``BtcDcaPlanConfig`` from flat manifest or legacy kwargs."""
+        unknown = set(kwargs) - _SUPPORTED_PLAN_KWARGS
+        if unknown:
+            raise TypeError(f"unexpected BTC DCA plan keyword argument: {sorted(unknown)[0]!r}")
+        if not kwargs:
+            return DEFAULT_BTC_DCA_PLAN_CONFIG
+
+        top_kwargs: dict[str, Any] = {
+            k: v for k, v in kwargs.items() if k in _TOP_LEVEL_PLAN_FIELDS
+        }
+        window_kwargs = {k: v for k, v in kwargs.items() if k in _EXECUTION_WINDOW_FIELDS}
+        drawdown_kwargs = {k: v for k, v in kwargs.items() if k in _DRAWDOWN_TIER_FIELDS}
+        ahr999_raw = {k: v for k, v in kwargs.items() if k in _AHR999_KWARG_TO_FIELD}
+        zscore_raw = {k: v for k, v in kwargs.items() if k in _ZSCORE_EXIT_KWARG_TO_FIELD}
+
+        if window_kwargs:
+            top_kwargs["execution_window"] = ExecutionWindowSpec(**window_kwargs)
+        if drawdown_kwargs:
+            top_kwargs["drawdown_tiers"] = DrawdownTierSpec(**drawdown_kwargs)
+        if ahr999_raw:
+            top_kwargs["ahr999"] = _build_spec_from_mapped_kwargs(
+                Ahr999Spec, _AHR999_KWARG_TO_FIELD, ahr999_raw,
+            )
+        if zscore_raw:
+            top_kwargs["zscore_exit"] = _build_spec_from_mapped_kwargs(
+                ZScoreExitSpec, _ZSCORE_EXIT_KWARG_TO_FIELD, zscore_raw,
+            )
+        return cls(**top_kwargs)
+
+
+DEFAULT_BTC_DCA_PLAN_CONFIG = BtcDcaPlanConfig()
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -128,28 +311,26 @@ def _localized_skip_reason(skip_reason: str, translator) -> str:
 def _is_in_execution_window(
     as_of: object,
     *,
-    cadence: str,
-    monthly_day: int,
-    monthly_window_calendar_days: int,
-    weekly_day: int,
-    weekly_window_calendar_days: int,
-    quarterly_months: object,
-    quarterly_day: int,
-    quarterly_window_calendar_days: int,
+    spec: ExecutionWindowSpec | None = None,
+    **legacy_kwargs: Any,
 ) -> tuple[bool, str]:
+    if spec is not None and legacy_kwargs:
+        raise TypeError("cannot combine 'spec' with legacy execution window keyword arguments")
+    if spec is None:
+        spec = ExecutionWindowSpec(**legacy_kwargs)
     timestamp = _as_timestamp(as_of)
-    cadence_key = str(cadence or "monthly").strip().lower()
+    cadence_key = str(spec.cadence or "monthly").strip().lower()
 
     if cadence_key == "weekly":
-        day = int(max(0, min(6, weekly_day)))
-        window = int(max(1, min(7, weekly_window_calendar_days)))
+        day = int(max(0, min(6, spec.weekly_day)))
+        window = int(max(1, min(7, spec.weekly_window_calendar_days)))
         days_since_start = (int(timestamp.weekday()) - day) % 7
         return days_since_start < window, f"weekly_day={day} window={window}d"
 
     if cadence_key == "quarterly":
-        months = _normalize_quarterly_months(quarterly_months)
-        start_day = int(max(1, min(31, quarterly_day)))
-        window = int(max(1, quarterly_window_calendar_days))
+        months = _normalize_quarterly_months(spec.quarterly_months)
+        start_day = int(max(1, min(31, spec.quarterly_day)))
+        window = int(max(1, spec.quarterly_window_calendar_days))
         months_text = ",".join(str(m) for m in months)
         return (
             timestamp.month in months and start_day <= int(timestamp.day) < start_day + window,
@@ -159,8 +340,8 @@ def _is_in_execution_window(
     if cadence_key != "monthly":
         raise ValueError("cadence must be 'monthly', 'weekly', or 'quarterly'")
 
-    start_day = int(max(1, min(31, monthly_day)))
-    window = int(max(1, monthly_window_calendar_days))
+    start_day = int(max(1, min(31, spec.monthly_day)))
+    window = int(max(1, spec.monthly_window_calendar_days))
     return (
         start_day <= int(timestamp.day) < start_day + window,
         f"monthly_day={start_day} window={window}d",
@@ -324,22 +505,14 @@ def _cycle_metrics_from_payload(
 def _determine_multiplier(
     indicator: dict[str, float | None],
     *,
-    mild_drawdown_threshold: float,
-    deep_drawdown_threshold: float,
-    severe_drawdown_threshold: float,
-    mild_discount_gap: float,
-    deep_discount_gap: float,
-    expensive_gap: float,
-    very_expensive_gap: float,
-    shallow_drawdown_threshold: float,
-    overbought_rsi: float,
-    mild_pullback_multiplier: float,
-    deep_pullback_multiplier: float,
-    severe_pullback_multiplier: float,
-    expensive_multiplier: float,
-    very_expensive_multiplier: float,
-    base_multiplier: float,
+    spec: DrawdownTierSpec | None = None,
+    base_multiplier: float = 1.0,
+    **legacy_kwargs: Any,
 ) -> tuple[float, str, dict[str, float]]:
+    if spec is not None and legacy_kwargs:
+        raise TypeError("cannot combine 'spec' with legacy drawdown tier keyword arguments")
+    if spec is None:
+        spec = DrawdownTierSpec(**legacy_kwargs)
     drawdown = float(indicator.get("drawdown_252d", 0.0) or 0.0)
     sma_gap = float(indicator.get("sma200_gap", 0.0) or 0.0)
     rsi14 = indicator.get("rsi14")
@@ -351,41 +524,45 @@ def _determine_multiplier(
         "rsi14": rsi_value,
     }
 
-    if drawdown >= severe_drawdown_threshold:
-        return float(severe_pullback_multiplier), "severe_pullback", metrics
-    if drawdown >= deep_drawdown_threshold or sma_gap <= -abs(float(deep_discount_gap)):
-        return float(deep_pullback_multiplier), "deep_pullback", metrics
-    if drawdown >= mild_drawdown_threshold or sma_gap <= -abs(float(mild_discount_gap)):
-        return float(mild_pullback_multiplier), "mild_pullback", metrics
-    if sma_gap >= very_expensive_gap and drawdown <= shallow_drawdown_threshold and not pd.isna(rsi_value) and rsi_value >= overbought_rsi:
-        return float(very_expensive_multiplier), "very_expensive_overbought", metrics
-    if sma_gap >= expensive_gap and drawdown <= shallow_drawdown_threshold:
-        return float(expensive_multiplier), "expensive", metrics
+    if drawdown >= spec.severe_drawdown_threshold:
+        return float(spec.severe_pullback_multiplier), "severe_pullback", metrics
+    if drawdown >= spec.deep_drawdown_threshold or sma_gap <= -abs(float(spec.deep_discount_gap)):
+        return float(spec.deep_pullback_multiplier), "deep_pullback", metrics
+    if drawdown >= spec.mild_drawdown_threshold or sma_gap <= -abs(float(spec.mild_discount_gap)):
+        return float(spec.mild_pullback_multiplier), "mild_pullback", metrics
+    if (
+        sma_gap >= spec.very_expensive_gap
+        and drawdown <= spec.shallow_drawdown_threshold
+        and not pd.isna(rsi_value)
+        and rsi_value >= spec.overbought_rsi
+    ):
+        return float(spec.very_expensive_multiplier), "very_expensive_overbought", metrics
+    if sma_gap >= spec.expensive_gap and drawdown <= spec.shallow_drawdown_threshold:
+        return float(spec.expensive_multiplier), "expensive", metrics
     return float(base_multiplier), "normal", metrics
 
 
 def _determine_cycle_multiplier(
     cycle_metrics: Mapping[str, object],
     *,
-    ahr999_bottom_threshold: float,
-    ahr999_accumulation_threshold: float,
-    ahr999_dca_threshold: float,
-    ahr999_bottom_multiplier: float,
-    ahr999_accumulation_multiplier: float,
-    ahr999_dca_multiplier: float,
-    ahr999_expensive_multiplier: float,
-    base_multiplier: float,
+    spec: Ahr999Spec | None = None,
+    base_multiplier: float = 1.0,
+    **legacy_kwargs: Any,
 ) -> tuple[float, str]:
+    if spec is not None and legacy_kwargs:
+        raise TypeError("cannot combine 'spec' with legacy AHR999 keyword arguments")
+    if spec is None:
+        spec = _build_spec_from_mapped_kwargs(Ahr999Spec, _AHR999_KWARG_TO_FIELD, legacy_kwargs)
     ahr999 = coerce_float(cycle_metrics.get("ahr999"), default=float("nan"))
     if pd.isna(ahr999):
         return float(base_multiplier), "normal"
-    if ahr999 <= float(ahr999_bottom_threshold):
-        return float(ahr999_bottom_multiplier), "ahr999_bottom"
-    if ahr999 <= float(ahr999_accumulation_threshold):
-        return float(ahr999_accumulation_multiplier), "ahr999_accumulation"
-    if ahr999 <= float(ahr999_dca_threshold):
-        return float(ahr999_dca_multiplier), "ahr999_dca"
-    return float(ahr999_expensive_multiplier), "ahr999_expensive"
+    if ahr999 <= float(spec.bottom_threshold):
+        return float(spec.bottom_multiplier), "ahr999_bottom"
+    if ahr999 <= float(spec.accumulation_threshold):
+        return float(spec.accumulation_multiplier), "ahr999_accumulation"
+    if ahr999 <= float(spec.dca_threshold):
+        return float(spec.dca_multiplier), "ahr999_dca"
+    return float(spec.expensive_multiplier), "ahr999_expensive"
 
 
 # ---------------------------------------------------------------------------
@@ -433,13 +610,21 @@ def _iter_mapping_payloads(value, *, _depth: int = 0):
 def _resolve_zscore_exit_context(
     portfolio_metadata: Mapping[str, object] | None,
     *,
-    enabled: object,
-    explicit_context: Mapping[str, object] | None,
-    parking_symbol: str,
-    risk_reduced_exposure: float,
-    risk_off_exposure: float,
+    spec: ZScoreExitSpec | None = None,
+    explicit_context: Mapping[str, object] | None = None,
+    **legacy_kwargs: Any,
 ) -> dict[str, object]:
-    config_enabled = coerce_bool(enabled, default=True)
+    if spec is not None and legacy_kwargs:
+        raise TypeError("cannot combine 'spec' with legacy Z-score exit keyword arguments")
+    if spec is None:
+        if any(k in _ZSCORE_EXIT_KWARG_TO_FIELD for k in legacy_kwargs):
+            spec = _build_spec_from_mapped_kwargs(
+                ZScoreExitSpec, _ZSCORE_EXIT_KWARG_TO_FIELD, legacy_kwargs,
+            )
+        else:
+            spec = ZScoreExitSpec(**legacy_kwargs)
+    config_enabled = coerce_bool(spec.enabled, default=True)
+    parking_symbol = normalize_symbol(spec.parking_symbol) or DEFAULT_PARKING_SYMBOL
 
     payload, source = _find_zscore_exit_payload(portfolio_metadata, explicit_context)
     if not isinstance(payload, Mapping):
@@ -485,9 +670,9 @@ def _resolve_zscore_exit_context(
                 target_btc_exposure = as_clamped_ratio(numeric, default=1.0)
                 break
         if route == "risk_reduced":
-            target_btc_exposure = as_clamped_ratio(risk_reduced_exposure, default=0.50)
+            target_btc_exposure = as_clamped_ratio(float(spec.risk_reduced_exposure), default=0.50)
         elif route == "risk_off":
-            target_btc_exposure = as_clamped_ratio(risk_off_exposure, default=0.25)
+            target_btc_exposure = as_clamped_ratio(float(spec.risk_off_exposure), default=0.25)
 
     active = route in ZSCORE_EXIT_POSITION_ROUTES
 
@@ -546,115 +731,38 @@ def _portfolio_metrics(snapshot) -> dict[str, float]:
 
 
 # ---------------------------------------------------------------------------
-# Core: build_rebalance_plan
+# Core: build_rebalance_plan and step helpers
 # ---------------------------------------------------------------------------
 
 
-def build_rebalance_plan(
-    portfolio,
+def _resolve_plan_config(
+    config: BtcDcaPlanConfig | None,
+    legacy_kwargs: Mapping[str, Any],
+) -> BtcDcaPlanConfig:
+    if config is not None:
+        if legacy_kwargs:
+            unexpected = ", ".join(sorted(legacy_kwargs))
+            raise TypeError(
+                f"build_rebalance_plan() cannot combine 'config' with legacy keyword arguments: {unexpected}"
+            )
+        return config
+    if not legacy_kwargs:
+        return DEFAULT_BTC_DCA_PLAN_CONFIG
+    return BtcDcaPlanConfig.from_kwargs(**legacy_kwargs)
+
+
+def _compute_smart_multiplier(
+    plan_config: BtcDcaPlanConfig,
     *,
-    as_of=None,
-    signal_symbol: str = DEFAULT_SIGNAL_SYMBOL,
-    base_investment_usd: float = 100.0,
-    max_investment_usd: float | None = None,
-    cash_reserve_usd: float = 0.0,
-    min_investment_usd: float = 5.0,
-    smart_multiplier_enabled: bool = True,
-    cycle_indicator_enabled: bool = True,
-    cadence: str = "monthly",
-    monthly_day: int = 25,
-    monthly_window_calendar_days: int = 5,
-    weekly_day: int = 4,
-    weekly_window_calendar_days: int = 4,
-    quarterly_months: object = (1, 4, 7, 10),
-    quarterly_day: int = 25,
-    quarterly_window_calendar_days: int = 5,
-    # Drawdown thresholds
-    mild_drawdown_threshold: float = 0.12,
-    deep_drawdown_threshold: float = 0.25,
-    severe_drawdown_threshold: float = 0.40,
-    mild_discount_gap: float = 0.08,
-    deep_discount_gap: float = 0.18,
-    expensive_gap: float = 0.30,
-    very_expensive_gap: float = 0.60,
-    shallow_drawdown_threshold: float = 0.05,
-    overbought_rsi: float = 75.0,
-    base_multiplier: float = 1.0,
-    mild_pullback_multiplier: float = 1.50,
-    deep_pullback_multiplier: float = 2.25,
-    severe_pullback_multiplier: float = 3.0,
-    expensive_multiplier: float = 1.0,
-    very_expensive_multiplier: float = 1.0,
-    # AHR999 thresholds
-    ahr999_bottom_threshold: float = 0.45,
-    ahr999_accumulation_threshold: float = 0.80,
-    ahr999_dca_threshold: float = 1.20,
-    ahr999_bottom_multiplier: float = 3.0,
-    ahr999_accumulation_multiplier: float = 2.25,
-    ahr999_dca_multiplier: float = 1.50,
-    ahr999_expensive_multiplier: float = 0.0,
-    # Z-score exit
-    zscore_exit_enabled: bool = True,
-    zscore_exit_parking_symbol: str = DEFAULT_PARKING_SYMBOL,
-    zscore_exit_risk_reduced_exposure: float = 0.50,
-    zscore_exit_risk_off_exposure: float = 0.25,
-    zscore_exit_allow_outside_execution_window: bool = True,
-    # External data
-    derived_indicators: Mapping[str, object] | None = None,
-    zscore_exit_context: Mapping[str, object] | None = None,
-    # Extension
-    translator=None,
-    strict_buy_window: bool = False,
-) -> dict[str, object]:
-    """Produce a full rebalance plan for the BTC DCA strategy."""
-    symbol = normalize_symbol(signal_symbol)
-    if not symbol:
-        symbol = DEFAULT_SIGNAL_SYMBOL
-
-    # --- Execution window ---
-    is_window, window_text = _is_in_execution_window(
-        as_of,
-        cadence=cadence,
-        monthly_day=monthly_day,
-        monthly_window_calendar_days=monthly_window_calendar_days,
-        weekly_day=weekly_day,
-        weekly_window_calendar_days=weekly_window_calendar_days,
-        quarterly_months=quarterly_months,
-        quarterly_day=quarterly_day,
-        quarterly_window_calendar_days=quarterly_window_calendar_days,
-    )
-
-    # --- Portfolio state ---
-    pm = _portfolio_metrics(portfolio)
-    total_equity = pm["total_equity"]
-    buying_power = pm["buying_power"]
-    btc_value = pm["btc_value"]
-    reserved_cash = max(0.0, coerce_float(cash_reserve_usd))
-    investable_cash = max(0.0, buying_power - reserved_cash)
-
-    # --- Portfolio metadata (for z-score exit lookup) ---
-    if isinstance(portfolio, Mapping):
-        portfolio_metadata = portfolio.get("metadata", {}) or {}
-    else:
-        portfolio_metadata = getattr(portfolio, "metadata", {}) or {}
-
-    # --- Z-score exit ---
-    zscore_exit = _resolve_zscore_exit_context(
-        portfolio_metadata,
-        enabled=zscore_exit_enabled,
-        explicit_context=zscore_exit_context,
-        parking_symbol=normalize_symbol(zscore_exit_parking_symbol) or DEFAULT_PARKING_SYMBOL,
-        risk_reduced_exposure=float(zscore_exit_risk_reduced_exposure),
-        risk_off_exposure=float(zscore_exit_risk_off_exposure),
-    )
-
-    # --- Smart multiplier ---
-    smart_enabled = coerce_bool(smart_multiplier_enabled, default=True)
+    symbol: str,
+    as_of: object,
+    derived_indicators: Mapping[str, object] | None,
+) -> tuple[bool, float, str, dict[str, float | str]]:
+    smart_enabled = coerce_bool(plan_config.smart_multiplier_enabled, default=True)
     cycle_metrics: dict[str, float | str] = {}
-    indicator: dict[str, float | None] = {}
     regime = "ordinary_dca"
     multiplier = 1.0
-    aggregate_metrics: dict[str, float] = {
+    aggregate_metrics: dict[str, float | str] = {
         "drawdown_252d": float("nan"),
         "sma200_gap": float("nan"),
         "rsi14": float("nan"),
@@ -664,20 +772,14 @@ def build_rebalance_plan(
         payload = _resolve_indicator_payload(derived_indicators, symbol)
         indicator = _indicator_from_payload(symbol, payload) if payload else {}
 
-        if coerce_bool(cycle_indicator_enabled, default=True):
+        if coerce_bool(plan_config.cycle_indicator_enabled, default=True):
             cycle_metrics = _cycle_metrics_from_payload(payload, as_of=as_of)
 
         if cycle_metrics and not pd.isna(coerce_float(cycle_metrics.get("ahr999"), default=float("nan"))):
             multiplier, regime = _determine_cycle_multiplier(
                 cycle_metrics,
-                ahr999_bottom_threshold=float(ahr999_bottom_threshold),
-                ahr999_accumulation_threshold=float(ahr999_accumulation_threshold),
-                ahr999_dca_threshold=float(ahr999_dca_threshold),
-                ahr999_bottom_multiplier=float(ahr999_bottom_multiplier),
-                ahr999_accumulation_multiplier=float(ahr999_accumulation_multiplier),
-                ahr999_dca_multiplier=float(ahr999_dca_multiplier),
-                ahr999_expensive_multiplier=float(ahr999_expensive_multiplier),
-                base_multiplier=float(base_multiplier),
+                spec=plan_config.ahr999,
+                base_multiplier=float(plan_config.base_multiplier),
             )
             if indicator:
                 aggregate_metrics.update({
@@ -686,27 +788,14 @@ def build_rebalance_plan(
                     "rsi14": float(indicator.get("rsi14") or float("nan")),
                 })
         elif indicator:
-            multiplier, regime, aggregate_metrics = _determine_multiplier(
+            multiplier, regime, drawdown_metrics = _determine_multiplier(
                 indicator,
-                mild_drawdown_threshold=float(mild_drawdown_threshold),
-                deep_drawdown_threshold=float(deep_drawdown_threshold),
-                severe_drawdown_threshold=float(severe_drawdown_threshold),
-                mild_discount_gap=float(mild_discount_gap),
-                deep_discount_gap=float(deep_discount_gap),
-                expensive_gap=float(expensive_gap),
-                very_expensive_gap=float(very_expensive_gap),
-                shallow_drawdown_threshold=float(shallow_drawdown_threshold),
-                overbought_rsi=float(overbought_rsi),
-                mild_pullback_multiplier=float(mild_pullback_multiplier),
-                deep_pullback_multiplier=float(deep_pullback_multiplier),
-                severe_pullback_multiplier=float(severe_pullback_multiplier),
-                expensive_multiplier=float(expensive_multiplier),
-                very_expensive_multiplier=float(very_expensive_multiplier),
-                base_multiplier=float(base_multiplier),
+                spec=plan_config.drawdown_tiers,
+                base_multiplier=float(plan_config.base_multiplier),
             )
+            aggregate_metrics.update(drawdown_metrics)
         # else: no indicator data available, use base_multiplier
 
-    # --- Update aggregate metrics with cycle data ---
     if cycle_metrics:
         aggregate_metrics.update({
             "ahr999": float(coerce_float(cycle_metrics.get("ahr999"), default=float("nan"))),
@@ -715,16 +804,30 @@ def build_rebalance_plan(
             "cycle_indicator_source": str(cycle_metrics.get("cycle_indicator_source", "none")),
         })
 
-    # --- Calculate investment amount ---
     regime_multiplier = float(multiplier if smart_enabled else 1.0)
-    requested_investment = max(0.0, float(base_investment_usd) * max(0.0, regime_multiplier))
-    if max_investment_usd is not None:
-        requested_investment = min(requested_investment, max(0.0, float(max_investment_usd)))
+    return smart_enabled, regime_multiplier, regime, aggregate_metrics
+
+
+def _resolve_investment_plan(
+    plan_config: BtcDcaPlanConfig,
+    *,
+    symbol: str,
+    is_window: bool,
+    buying_power: float,
+    btc_value: float,
+    regime_multiplier: float,
+    zscore_exit: dict[str, object],
+    strict_buy_window: bool,
+) -> dict[str, object]:
+    reserved_cash = max(0.0, coerce_float(plan_config.cash_reserve_usd))
+    investable_cash = max(0.0, buying_power - reserved_cash)
+    requested_investment = max(0.0, float(plan_config.base_investment_usd) * max(0.0, regime_multiplier))
+    if plan_config.max_investment_usd is not None:
+        requested_investment = min(requested_investment, max(0.0, float(plan_config.max_investment_usd)))
     planned_investment = min(requested_investment, investable_cash)
     cash_capped = investable_cash < requested_investment
 
-    # --- Actionability ---
-    skip_reason = None
+    skip_reason: str | None = None
     actionable = True
     if not is_window:
         skip_reason = "outside_execution_window"
@@ -732,14 +835,13 @@ def build_rebalance_plan(
     elif regime_multiplier <= 0.0 or requested_investment <= 0.0:
         skip_reason = "valuation_too_expensive"
         actionable = False
-    elif planned_investment < float(min_investment_usd):
+    elif planned_investment < float(plan_config.min_investment_usd):
         skip_reason = "insufficient_cash"
         actionable = False
 
-    # --- Z-score exit overlay ---
     zscore_overlay_applied = bool(zscore_exit["applied"])
     if zscore_overlay_applied and not is_window and not coerce_bool(
-        zscore_exit_allow_outside_execution_window, default=True,
+        plan_config.zscore_exit.allow_outside_execution_window, default=True,
     ):
         zscore_overlay_applied = False
         zscore_exit["applied"] = False
@@ -749,7 +851,6 @@ def build_rebalance_plan(
         planned_investment if actionable or (zscore_overlay_applied and not strict_buy_window) else 0.0
     )
 
-    # --- Target values ---
     target_btc_value = btc_value
     if zscore_overlay_applied:
         controlled_value = btc_value + planned_investment
@@ -759,11 +860,37 @@ def build_rebalance_plan(
     elif actionable:
         target_btc_value = btc_value + planned_investment
 
-    target_values = {symbol: target_btc_value}
-
-    # --- Signal description ---
-    localized_regime = _localized_regime(regime, translator)
     displayed_planned = float(planned_investment if actionable else 0.0)
+    return {
+        "reserved_cash": reserved_cash,
+        "investable_cash": investable_cash,
+        "requested_investment": requested_investment,
+        "planned_investment": planned_investment,
+        "displayed_planned": displayed_planned,
+        "cash_capped": cash_capped,
+        "actionable": actionable,
+        "skip_reason": skip_reason,
+        "target_values": {symbol: target_btc_value} if actionable else {},
+    }
+
+
+def _format_plan_descriptions(
+    *,
+    smart_enabled: bool,
+    regime: str,
+    regime_multiplier: float,
+    planned_investment: float,
+    displayed_planned: float,
+    requested_investment: float,
+    investable_cash: float,
+    cash_capped: bool,
+    skip_reason: str | None,
+    zscore_exit: Mapping[str, object],
+    window_text: str,
+    aggregate_metrics: Mapping[str, float | str],
+    translator: Any,
+) -> tuple[str, str]:
+    localized_regime = _localized_regime(regime, translator)
     cash_for_display = float(investable_cash)
 
     if smart_enabled:
@@ -832,7 +959,6 @@ def build_rebalance_plan(
             parking_symbol=str(zscore_exit["parking_symbol"]),
         )
 
-    # --- Status description ---
     if smart_enabled:
         cycle_text = ""
         ahr999_val = aggregate_metrics.get("ahr999")
@@ -856,11 +982,83 @@ def build_rebalance_plan(
             fallback_zh="{window} | 普通定投",
             window=window_text,
         )
+    return signal_desc, status_desc
+
+
+def build_rebalance_plan(
+    portfolio: Any,
+    *,
+    as_of: object = None,
+    config: BtcDcaPlanConfig | None = None,
+    derived_indicators: Mapping[str, object] | None = None,
+    zscore_exit_context: Mapping[str, object] | None = None,
+    translator: Any = None,
+    strict_buy_window: bool = False,
+    **legacy_kwargs: Any,
+) -> dict[str, object]:
+    """Produce a full rebalance plan for the BTC DCA strategy."""
+    plan_config = _resolve_plan_config(config, legacy_kwargs)
+    symbol = normalize_symbol(plan_config.signal_symbol) or DEFAULT_SIGNAL_SYMBOL
+
+    is_window, window_text = _is_in_execution_window(
+        as_of,
+        spec=plan_config.execution_window,
+    )
+
+    pm = _portfolio_metrics(portfolio)
+    total_equity = pm["total_equity"]
+    buying_power = pm["buying_power"]
+    btc_value = pm["btc_value"]
+
+    if isinstance(portfolio, Mapping):
+        portfolio_metadata = portfolio.get("metadata", {}) or {}
+    else:
+        portfolio_metadata = getattr(portfolio, "metadata", {}) or {}
+
+    zscore_exit = _resolve_zscore_exit_context(
+        portfolio_metadata,
+        spec=plan_config.zscore_exit,
+        explicit_context=zscore_exit_context,
+    )
+
+    smart_enabled, regime_multiplier, regime, aggregate_metrics = _compute_smart_multiplier(
+        plan_config,
+        symbol=symbol,
+        as_of=as_of,
+        derived_indicators=derived_indicators,
+    )
+
+    sizing = _resolve_investment_plan(
+        plan_config,
+        symbol=symbol,
+        is_window=is_window,
+        buying_power=buying_power,
+        btc_value=btc_value,
+        regime_multiplier=regime_multiplier,
+        zscore_exit=zscore_exit,
+        strict_buy_window=strict_buy_window,
+    )
+
+    signal_desc, status_desc = _format_plan_descriptions(
+        smart_enabled=smart_enabled,
+        regime=regime,
+        regime_multiplier=regime_multiplier,
+        planned_investment=float(sizing["planned_investment"]),
+        displayed_planned=float(sizing["displayed_planned"]),
+        requested_investment=float(sizing["requested_investment"]),
+        investable_cash=float(sizing["investable_cash"]),
+        cash_capped=bool(sizing["cash_capped"]),
+        skip_reason=sizing["skip_reason"],  # type: ignore[arg-type]
+        zscore_exit=zscore_exit,
+        window_text=window_text,
+        aggregate_metrics=aggregate_metrics,
+        translator=translator,
+    )
 
     return {
-        "actionable": actionable,
-        "skip_reason": skip_reason,
-        "target_values": target_values if actionable else {},
+        "actionable": bool(sizing["actionable"]),
+        "skip_reason": sizing["skip_reason"],
+        "target_values": sizing["target_values"],
         "managed_symbols": (symbol,),
         "signal_symbol": symbol,
         "signal_description": signal_desc,
@@ -869,14 +1067,14 @@ def build_rebalance_plan(
         "multiplier": float(regime_multiplier),
         "regime_multiplier": float(regime_multiplier),
         "smart_multiplier_enabled": bool(smart_enabled),
-        "base_investment_usd": float(base_investment_usd),
-        "requested_investment_usd": float(requested_investment),
-        "planned_investment_usd": float(displayed_planned),
+        "base_investment_usd": float(plan_config.base_investment_usd),
+        "requested_investment_usd": float(sizing["requested_investment"]),
+        "planned_investment_usd": float(sizing["displayed_planned"]),
         "available_cash": float(buying_power),
-        "reserved_cash": float(reserved_cash),
-        "investable_cash": float(investable_cash),
-        "cash_capped": bool(cash_capped),
-        "min_investment_usd": float(min_investment_usd),
+        "reserved_cash": float(sizing["reserved_cash"]),
+        "investable_cash": float(sizing["investable_cash"]),
+        "cash_capped": bool(sizing["cash_capped"]),
+        "min_investment_usd": float(plan_config.min_investment_usd),
         "execution_window": window_text,
         "in_execution_window": bool(is_window),
         "zscore_exit": zscore_exit,
@@ -912,6 +1110,7 @@ def compute_signals(
     total_equity: float,
     state: dict[str, Any] | None = None,
     *,
+    config: BtcDcaPlanConfig | None = None,
     derived_indicators: Mapping[str, object] | None = None,
     translator=None,
     strict_plan: bool = False,
@@ -925,32 +1124,42 @@ def compute_signals(
     if state is None:
         state = {}
 
-    # Build full rebalance plan if we have portfolio + config
     plan: dict[str, object] = {}
     portfolio_for_plan = portfolio
+    call_kwargs = dict(kwargs)
+    as_of = call_kwargs.pop("as_of", None)
+    zscore_exit_context = call_kwargs.pop("zscore_exit_context", None)
 
-    # Extract runtime config from kwargs (combo-style) or use defaults
-    smart_enabled = coerce_bool(
-        kwargs.get("smart_multiplier_enabled", True), default=True,
-    )
-    base_amount = coerce_float(
-        kwargs.get("base_investment_usd", 100.0), default=100.0,
-    )
+    if config is not None:
+        smart_enabled = coerce_bool(config.smart_multiplier_enabled, default=True)
+    else:
+        smart_enabled = coerce_bool(
+            call_kwargs.get("smart_multiplier_enabled", True), default=True,
+        )
+        base_amount = coerce_float(
+            call_kwargs.get("base_investment_usd", 100.0), default=100.0,
+        )
+        call_kwargs["smart_multiplier_enabled"] = smart_enabled
+        call_kwargs["base_investment_usd"] = base_amount
 
     try:
+        if config is not None:
+            if call_kwargs:
+                unexpected = ", ".join(sorted(call_kwargs))
+                raise TypeError(
+                    f"compute_signals() cannot combine 'config' with legacy keyword arguments: {unexpected}"
+                )
+            plan_config = config
+        else:
+            plan_config = BtcDcaPlanConfig.from_kwargs(**call_kwargs)
         plan = build_rebalance_plan(
             portfolio_for_plan,
-            as_of=kwargs.get("as_of"),
-            smart_multiplier_enabled=smart_enabled,
-            base_investment_usd=base_amount,
+            as_of=as_of,
+            config=plan_config,
             derived_indicators=derived_indicators,
+            zscore_exit_context=zscore_exit_context,
             translator=translator,
-            **({"strict_buy_window": True} if strict_plan else {}),
-            **{
-                k: v
-                for k, v in kwargs.items()
-                if k not in {"as_of", "smart_multiplier_enabled", "base_investment_usd"}
-            },
+            strict_buy_window=strict_plan,
         )
     except (ValueError, TypeError) as exc:
         if strict_plan:
