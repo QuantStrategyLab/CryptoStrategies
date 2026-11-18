@@ -37,7 +37,16 @@ def test_drift_workflow_wires_real_pipeline_inputs_and_preflight_bundle() -> Non
     assert "Upload lifecycle preflight artifact" in workflow
     assert "lifecycle-preflight-${{ github.run_id }}-${{ github.run_attempt }}" in workflow
     assert workflow.count("github.ref == format('refs/heads/{0}', github.event.repository.default_branch)") == 2
-    assert "uses: QuantStrategyLab/QuantPlatformKit/.github/workflows/reusable-drift-check.yml@474b701dabcb910f085bfff25a41daf5c0a52a5b" in workflow
+    assert "uses: QuantStrategyLab/QuantPlatformKit/.github/workflows/reusable-drift-check.yml@76550ba38c7a9b83c4d91a7292bf54f24e7fa6fe" in workflow
+    assert "disable_legacy_pat_fallback:" in workflow
+    assert "HAS_QSL_DRIFT_APP: ${{ secrets.QSL_DRIFT_APP_ID != '' && secrets.QSL_DRIFT_APP_PRIVATE_KEY != '' }}" in workflow
+    assert "HAS_QSL_GITHUB_APP: ${{ secrets.QSL_GITHUB_APP_ID != '' && secrets.QSL_GITHUB_APP_PRIVATE_KEY != '' }}" in workflow
+    assert "repositories: CryptoLivePoolPipelines" in workflow
+    assert "permission-contents: read" in workflow
+    assert "permission-actions: read" in workflow
+    assert "continue-on-error: ${{ !(github.event_name == 'workflow_dispatch' && inputs.disable_legacy_pat_fallback) }}" in workflow
+    assert 'if [ "${DISABLE_LEGACY_PAT_FALLBACK:-false}" = "true" ]; then' in workflow
+    assert 'echo "::error::GitHub App token is required when disable_legacy_pat_fallback is true"' in workflow
     assert "strategy_domain: crypto" in workflow
     assert "snapshot_repository: QuantStrategyLab/CryptoLivePoolPipelines" in workflow
     assert "snapshot_checkout_path: external/CryptoLivePoolPipelines" in workflow
@@ -46,6 +55,13 @@ def test_drift_workflow_wires_real_pipeline_inputs_and_preflight_bundle() -> Non
     assert "lifecycle_preflight_artifact: lifecycle-preflight-${{ github.run_id }}-${{ github.run_attempt }}" in producer
     assert "lifecycle_preflight_artifact: ${{ needs.preflight_backtests.outputs.lifecycle_preflight_artifact }}" in consumer
     assert "github.run_attempt" not in consumer
+    assert "disable_legacy_pat_fallback: ${{ github.event_name == 'workflow_dispatch' && inputs.disable_legacy_pat_fallback }}" in consumer
+    assert "qsl_drift_app_id: ${{ secrets.QSL_DRIFT_APP_ID || secrets.QSL_GITHUB_APP_ID }}" in consumer
+    assert "qsl_drift_app_private_key: ${{ secrets.QSL_DRIFT_APP_PRIVATE_KEY || secrets.QSL_GITHUB_APP_PRIVATE_KEY }}" in consumer
+    assert (
+        "snapshot_repository_token: ${{ !(github.event_name == 'workflow_dispatch' && inputs.disable_legacy_pat_fallback) && "
+        "(secrets.SNAPSHOT_REPOSITORY_TOKEN || secrets.QSL_REPO_SYNC_TOKEN || github.token) || '' }}"
+    ) in consumer
     # Retired v1 Codex/GPT/Claude reviewer wiring must not return.
     assert "codex_audit_service_url" not in workflow
     assert "ai_gateway_service_url" not in workflow
@@ -55,4 +71,3 @@ def test_drift_workflow_wires_real_pipeline_inputs_and_preflight_bundle() -> Non
     assert "ai_service_audience: ${{ vars.AI_SERVICE_AUDIENCE }}" in workflow
     assert "ai_service_reviewers_json: ${{ vars.AI_SERVICE_REVIEWERS_JSON }}" in workflow
     assert "id-token: write" in workflow
-    assert "secrets.SNAPSHOT_REPOSITORY_TOKEN || secrets.QSL_REPO_SYNC_TOKEN || github.token" in workflow
