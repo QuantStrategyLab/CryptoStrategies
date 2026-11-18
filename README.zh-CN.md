@@ -78,6 +78,9 @@ BTC 腿目标；未提供映射 benchmark 时，缺失 BTC 数据会在组合腿
 live-pool 的均线斜率规则。持仓可见性来自提供的投资组合，不来自行情价格键。
 历史日指标生产者本身不能证明 K 线已收盘或满足 PIT；平台验证路径须单独建立这些
 输入边界。
+独立趋势运行入口会将当前生效的 `target_vol` 和 `max_leverage` 配置传入既有的波动率仓位计算。
+两者的默认值仍分别为 `0.40` 和 `1.0`。该计算会将目标敞口与加权单资产 `vol20` 代理指标进行比较，
+并限制总敞口上限；它并不建立协方差组合波动率，也不授予执行权限。
 
 ## 如何接到执行平台
 
@@ -111,6 +114,25 @@ python -m pip install -e .
 python -m pytest -q
 ```
 
+## 研究尝试记录
+
+向 `scripts/run_walk_forward_backtest.py` 传入 `--attempt-record-dir <protected-directory>`
+可记录单次研究尝试；不传则保持现有流程。调用方须自行选择受保护的存储目录，并确保记录不进入
+Git。参数解析完成后、读取输入前即开始记录。初始记录与后续更新均以原子方式落盘；若中途失败
+或中断，可能留下已开始的记录。基线持久化、输出文件与尝试记录属于各自独立的写入操作，并非
+事务；各自状态分别记录，出现未知状态时需人工排查。新记录使用
+`crypto.walk_forward_attempt.v2` 格式，在两个输出状态字段中新增了 `not_attempted`。
+被请求的输出初始状态为 `not_attempted`，写入前变为 `unknown`，写入调用返回后变为 `written`。
+`written` 不保证校验摘要或持久存储；`not_requested` 表示未请求该输出。既有 v1 记录不会被
+重写，其中的 `not_requested` 可能包含写入前即失败的请求。v1 消费方须显式协调并升级以支持
+v2，不得静默放宽校验。版本边界见
+[输出状态决策](docs/adr/0001-version-research-attempt-output-states.md)。
+
+记录内容包含参数、时间窗口、可用的规范化输入输出摘要以及入口文件摘要。即使未请求输出文件，
+返回的摘要也会包含规范化 JSON 摘要；它不是完整的净收益矩阵，也不证明磁盘上存在对应文件。
+摘要不认证数据来源，也不覆盖全部代码与依赖；缺失的输入与成本仍记为未知。每条记录均设置
+`family_complete=false`，既不重建历史试验次数，也不授予研究、DSR/PBO 或实盘交易批准。
+
 ## 延伸文档
 
 - [运行时监控依赖提案](docs/adr/0002-declare-runtime-monitoring-dependencies.md)
@@ -134,6 +156,12 @@ python -m pytest -q
 - 贡献前请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)，确认 PR 范围、本地校验和文档要求。
 - 讨论、issue 和 review 请遵守 [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)。
 - 涉及密钥、自动化、券商/交易所或云资源的漏洞请按 [SECURITY.md](SECURITY.md) 私密报告；不要为 secret 或实盘风险开公开 issue。
+
+### 手动 AI 验证
+
+以 `verification_only=true` 运行 `Drift Check`，可在不发布 drift issue 的情况下演练现有输入与
+AI 审查路径。审查会接收实测维度、阈值及基线谱系。若证据缺失或给出非批准建议，结果仍会被
+挂起；验证绝不授予实盘交易权限。
 
 ## 许可证
 
