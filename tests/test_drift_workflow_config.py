@@ -56,8 +56,8 @@ def test_drift_workflow_wires_real_pipeline_inputs_and_preflight_bundle() -> Non
     assert "lifecycle_preflight_artifact: ${{ needs.preflight_backtests.outputs.lifecycle_preflight_artifact }}" in consumer
     assert "github.run_attempt" not in consumer
     assert "disable_legacy_pat_fallback: ${{ github.event_name == 'workflow_dispatch' && inputs.disable_legacy_pat_fallback }}" in consumer
-    assert "qsl_drift_app_id: ${{ secrets.QSL_DRIFT_APP_ID || secrets.QSL_GITHUB_APP_ID }}" in consumer
-    assert "qsl_drift_app_private_key: ${{ secrets.QSL_DRIFT_APP_PRIVATE_KEY || secrets.QSL_GITHUB_APP_PRIVATE_KEY }}" in consumer
+    assert "qsl_drift_app_id: ${{ (secrets.QSL_DRIFT_APP_ID != '' && secrets.QSL_DRIFT_APP_PRIVATE_KEY != '') && secrets.QSL_DRIFT_APP_ID || secrets.QSL_GITHUB_APP_ID }}" in consumer
+    assert "qsl_drift_app_private_key: ${{ (secrets.QSL_DRIFT_APP_ID != '' && secrets.QSL_DRIFT_APP_PRIVATE_KEY != '') && secrets.QSL_DRIFT_APP_PRIVATE_KEY || secrets.QSL_GITHUB_APP_PRIVATE_KEY }}" in consumer
     assert (
         "snapshot_repository_token: ${{ !(github.event_name == 'workflow_dispatch' && inputs.disable_legacy_pat_fallback) && "
         "(secrets.SNAPSHOT_REPOSITORY_TOKEN || secrets.QSL_REPO_SYNC_TOKEN || github.token) || '' }}"

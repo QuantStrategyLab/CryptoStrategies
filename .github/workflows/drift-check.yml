@@ -226,5 +226,5 @@ jobs:
       lifecycle_preflight_artifact: ${{ needs.preflight_backtests.outputs.lifecycle_preflight_artifact }}
     secrets:
       snapshot_repository_token: ${{ !(github.event_name == 'workflow_dispatch' && inputs.disable_legacy_pat_fallback) && (secrets.SNAPSHOT_REPOSITORY_TOKEN || secrets.QSL_REPO_SYNC_TOKEN || github.token) || '' }}
-      qsl_drift_app_id: ${{ secrets.QSL_DRIFT_APP_ID || secrets.QSL_GITHUB_APP_ID }}
-      qsl_drift_app_private_key: ${{ secrets.QSL_DRIFT_APP_PRIVATE_KEY || secrets.QSL_GITHUB_APP_PRIVATE_KEY }}
+      qsl_drift_app_id: ${{ (secrets.QSL_DRIFT_APP_ID != '' && secrets.QSL_DRIFT_APP_PRIVATE_KEY != '') && secrets.QSL_DRIFT_APP_ID || secrets.QSL_GITHUB_APP_ID }}
+      qsl_drift_app_private_key: ${{ (secrets.QSL_DRIFT_APP_ID != '' && secrets.QSL_DRIFT_APP_PRIVATE_KEY != '') && secrets.QSL_DRIFT_APP_PRIVATE_KEY || secrets.QSL_GITHUB_APP_PRIVATE_KEY }}
