@@ -27,6 +27,8 @@ jobs:
     if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      HAS_QSL_GITHUB_APP: ${{ secrets.QSL_GITHUB_APP_ID != '' && secrets.QSL_GITHUB_APP_PRIVATE_KEY != '' }}
     outputs:
       lifecycle_preflight_artifact: lifecycle-preflight-${{ github.run_id }}-${{ github.run_attempt }}
       snapshot_repository_ref: ${{ steps.snapshot-input.outputs.snapshot_repository_ref }}
@@ -53,10 +55,20 @@ jobs:
           python -m pip install -e . pandas
           python -m pip install --no-deps -e external/QuantPlatformKit
 
+      - name: Generate GitHub App token
+        id: app_token
+        if: env.HAS_QSL_GITHUB_APP == 'true'
+        continue-on-error: true
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v3
+        with:
+          app-id: ${{ secrets.QSL_GITHUB_APP_ID }}
+          private-key: ${{ secrets.QSL_GITHUB_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
       - name: Download latest trusted lifecycle inputs
         id: snapshot-input
         env:
-          GH_TOKEN: ${{ secrets.SNAPSHOT_REPOSITORY_TOKEN || secrets.QSL_REPO_SYNC_TOKEN || github.token }}
+          GH_TOKEN: ${{ steps.app_token.outputs.token || secrets.SNAPSHOT_REPOSITORY_TOKEN || secrets.QSL_REPO_SYNC_TOKEN || github.token }}
           INPUT_ROOT: ${{ runner.temp }}/crypto-lifecycle-inputs
         run: |
           set -euo pipefail
