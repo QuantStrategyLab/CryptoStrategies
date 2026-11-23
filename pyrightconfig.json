@@ -1,0 +1,11 @@
+{
+  "include": [
+    "src/crypto_strategies/runtime_allowlist.py",
+    "src/crypto_strategies/strategies/crypto_live_pool_rotation/rotation.py"
+  ],
+  "extraPaths": [
+    "src"
+  ],
+  "pythonVersion": "3.11",
+  "typeCheckingMode": "basic"
+}
