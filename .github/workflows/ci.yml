@@ -82,6 +82,13 @@ jobs:
           set -euo pipefail
           ruff check .
 
+      - name: Check architecture boundaries and typed core modules
+        run: |
+          set -euo pipefail
+          python -m pip install import-linter==2.1 pyright==1.1.407
+          PYTHONPATH=src lint-imports
+          pyright
+
       - name: Check QPK pin and lock consistency
         run: |
           set -euo pipefail

@@ -1,0 +1,11 @@
+[importlinter]
+root_package = crypto_strategies
+
+[importlinter:contract:strategies_no_entrypoints]
+name = Live strategies must not import entrypoints or backtest
+type = forbidden
+source_modules =
+    crypto_strategies.strategies
+forbidden_modules =
+    crypto_strategies.entrypoints
+    crypto_strategies.backtest
